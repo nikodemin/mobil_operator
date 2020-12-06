@@ -49,7 +49,9 @@ object AccountActor {
 
   val typeKey: EntityTypeKey[Command] = EntityTypeKey[Command]("AccountActor")
 
-  def entityId(phoneNumber: String) = s"Account actor: $phoneNumber"
+  val tag = "Account actor"
+
+  def entityId(phoneNumber: String) = s"$tag, phone number: $phoneNumber"
 
   def apply(entityId: EntityId): Behavior[Command] =
     Behaviors.setup { ctx =>
@@ -104,6 +106,7 @@ object AccountActor {
         eventHandler
       ).withRetention(RetentionCriteria.snapshotEvery(10, 3)
         .withDeleteEventsOnSnapshot)
+        .withTagger(_ => Set(tag))
         .onPersistFailure(SupervisorStrategy.restartWithBackoff(200.millis, 5.seconds, 0.1))
     }
 }

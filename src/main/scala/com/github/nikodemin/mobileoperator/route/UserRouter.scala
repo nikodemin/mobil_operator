@@ -2,7 +2,8 @@ package com.github.nikodemin.mobileoperator.route
 
 import akka.http.scaladsl.server.Directives._enhanceRouteWithConcatenation
 import akka.http.scaladsl.server.Route
-import com.github.nikodemin.mobileoperator.model.dto.{UserAddDto, UserGetDto}
+import com.github.nikodemin.mobileoperator.actor.UserActor
+import com.github.nikodemin.mobileoperator.model.dto.{UserAddDto, UserChangeDto, UserGetDto}
 import com.github.nikodemin.mobileoperator.route.interfaces.BaseRouter
 import com.github.nikodemin.mobileoperator.route.util.Implicits._
 import com.github.nikodemin.mobileoperator.service.UserService
@@ -13,8 +14,8 @@ import sttp.tapir.{Endpoint, _}
 import scala.concurrent.ExecutionContext
 
 class UserRouter(userService: UserService)(implicit executionContext: ExecutionContext) extends BaseRouter {
-  override lazy val route: Route = addUserRoute ~ getUserByEmailRoute
-  override lazy val endpoints: List[Endpoint[_, _, _, _]] = List(addUser, getUserByEmail)
+  override lazy val route: Route = addUserRoute ~ getUserByEmailRoute ~ changeUserRoute ~ getAllUsersRoute
+  override lazy val endpoints: List[Endpoint[_, _, _, _]] = List(addUser, getUserByEmail, changeUser, getAllUsers)
 
   private val userEndpoint = endpoint.in("user").tag("user")
 
@@ -32,4 +33,20 @@ class UserRouter(userService: UserService)(implicit executionContext: ExecutionC
     .out(jsonBody[UserGetDto])
 
   private val getUserByEmailRoute = getUserByEmail.toRoute(userService.getUserByEmail)
+
+  private val changeUser = userEndpoint
+    .put
+    .in("email")
+    .in(path[String]("email"))
+    .in(jsonBody[UserChangeDto])
+    .out(jsonBody[Boolean])
+
+  private val changeUserRoute = changeUser.toRoute(entry => userService.changeUser(entry._1, entry._2))
+
+  private val getAllUsers = userEndpoint
+    .get
+    .in("events")
+    .out(jsonBody[Iterable[UserActor.Event]])
+
+  private val getAllUsersRoute = getAllUsers.toRoute(_ => userService.getAllUsersEvents)
 }

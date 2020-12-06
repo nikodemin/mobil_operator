@@ -1,6 +1,7 @@
 package com.github.nikodemin.mobileoperator.route.util
 
-import com.github.nikodemin.mobileoperator.model.dto.{AccountAddDto, UserAddDto, UserGetDto}
+import com.github.nikodemin.mobileoperator.actor.UserActor
+import com.github.nikodemin.mobileoperator.model.dto.{AccountAddDto, UserAddDto, UserChangeDto, UserGetDto}
 import io.circe.generic.semiauto.{deriveDecoder, deriveEncoder}
 import io.circe.{Decoder, Encoder}
 
@@ -13,6 +14,10 @@ object Implicits {
   implicit val userAddDtoEncoder: Encoder[UserAddDto] = deriveEncoder[UserAddDto]
   implicit val userGetDtoDecoder: Decoder[UserGetDto] = deriveDecoder[UserGetDto]
   implicit val userGetDtoEncoder: Encoder[UserGetDto] = deriveEncoder[UserGetDto]
+  implicit val userChangeDtoDecoder: Decoder[UserChangeDto] = deriveDecoder[UserChangeDto]
+  implicit val userChangeDtoEncoder: Encoder[UserChangeDto] = deriveEncoder[UserChangeDto]
+  implicit val userChangtoDecoder: Decoder[UserActor.Event] = deriveDecoder[UserActor.Event]
+  implicit val userChangtoEncoder: Encoder[UserActor.Event] = deriveEncoder[UserActor.Event]
 
   implicit def toEither[T](future: Future[T])(implicit executionContext: ExecutionContext): Future[Right[Nothing, T]] =
     future.map(Right(_))

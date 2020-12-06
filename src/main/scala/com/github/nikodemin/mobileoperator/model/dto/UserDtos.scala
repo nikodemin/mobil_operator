@@ -11,3 +11,5 @@ case class UserGetDto(firstName: String, lastName: String, email: String, dateOf
 object UserGetDto {
   def fromState(state: State) = UserGetDto(state.firstName, state.lastName, state.email, state.dateOfBirth)
 }
+
+case class UserChangeDto(firstName: String, lastName: String, email: String, dateOfBirth: LocalDate)

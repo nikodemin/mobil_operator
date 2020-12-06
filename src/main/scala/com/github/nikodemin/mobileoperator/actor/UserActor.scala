@@ -46,7 +46,9 @@ object UserActor {
 
   val typeKey: EntityTypeKey[Command] = EntityTypeKey[Command]("UserActor")
 
-  def entityId(email: String) = s"User actor, email: $email"
+  val tag = "User Actor"
+
+  def entityId(email: String) = s"$tag, email: $email"
 
   def apply(sharding: ClusterSharding, entityId: EntityId): Behavior[Command] = Behaviors.setup { ctx =>
 
@@ -104,6 +106,7 @@ object UserActor {
       commandHandler,
       eventHandler
     ).withRetention(RetentionCriteria.snapshotEvery(10, 3).withDeleteEventsOnSnapshot)
+      .withTagger(_ => Set(tag))
       .onPersistFailure(SupervisorStrategy.restartWithBackoff(200.millis, 5.seconds, 0.1))
   }
 
