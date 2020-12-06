@@ -9,8 +9,6 @@ import akka.cluster.typed.Cluster
 import akka.http.scaladsl.Http
 import akka.http.scaladsl.server.Directives._
 import akka.management.scaladsl.AkkaManagement
-import akka.persistence.cassandra.query.scaladsl.CassandraReadJournal
-import akka.persistence.query.PersistenceQuery
 import akka.util.Timeout
 import com.github.nikodemin.mobileoperator.actor.{AccountActor, UserActor}
 import com.github.nikodemin.mobileoperator.route.{AccountRouter, UserRouter}
@@ -48,10 +46,8 @@ object Main {
 
     implicit val askTimeout: Timeout = Timeout(1.second)
 
-    val journal = PersistenceQuery.get(system).readJournalFor[CassandraReadJournal](CassandraReadJournal.Identifier)
-
     val accountService = new AccountService(sharding)
-    val userService = new UserService(sharding, journal)
+    val userService = new UserService(sharding)
 
     val accountRouter = new AccountRouter(accountService)
     val userRouter = new UserRouter(userService)

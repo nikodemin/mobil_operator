@@ -18,11 +18,7 @@ object UserActor {
 
   case class AddAccount(phoneNumber: String, pricingPlanName: String, pricingPlan: Int) extends Command
 
-  case class DeactivateAccount(phoneNumber: String) extends Command
-
-  case class ActivateAccount(phoneNumber: String) extends Command
-
-  case class ChangeUserData(firstName: Option[String], lastName: Option[String], email: Option[String],
+  case class ChangeUserData(firstName: Option[String], lastName: Option[String],
                             dateOfBirth: Option[LocalDate]) extends Command
 
   case class Get(replyTo: ActorRef[State]) extends Command
@@ -32,15 +28,11 @@ object UserActor {
 
   case class AccountAdded(phoneNumber: String, pricingPlanName: String, pricingPlan: Int) extends Event
 
-  case class AccountDeactivated(phoneNumber: String) extends Event
-
-  case class AccountActivated(phoneNumber: String) extends Event
-
-  case class UserDataChanged(firstName: Option[String], lastName: Option[String], email: Option[String],
+  case class UserDataChanged(firstName: Option[String], lastName: Option[String],
                              dateOfBirth: Option[LocalDate]) extends Event
 
 
-  case class State(firstName: String, lastName: String, email: String, dateOfBirth: LocalDate,
+  case class State(firstName: String, lastName: String, dateOfBirth: LocalDate,
                    phoneNumbers: List[String]) extends CborSerializable
 
 
@@ -58,12 +50,8 @@ object UserActor {
         case AddAccount(phoneNumber, pricingPlanName, pricingPlan) =>
           Effect.persist(AccountAdded(phoneNumber, pricingPlanName, pricingPlan))
 
-        case DeactivateAccount(phoneNumber) => Effect.persist(AccountDeactivated(phoneNumber))
-
-        case ActivateAccount(phoneNumber) => Effect.persist(AccountActivated(phoneNumber))
-
-        case ChangeUserData(firstName, lastName, email, dateOfBirth) =>
-          Effect.persist(UserDataChanged(firstName, lastName, email, dateOfBirth))
+        case ChangeUserData(firstName, lastName, dateOfBirth) =>
+          Effect.persist(UserDataChanged(firstName, lastName, dateOfBirth))
 
         case Get(replyTo) => Effect.none.thenRun(replyTo ! _)
       }
@@ -82,19 +70,10 @@ object UserActor {
           sendCommandToAccount(phoneNumber, AccountActor.SetPricingPlan(pricingPlanName, pricingPlan))
           state.copy(phoneNumbers = state.phoneNumbers.prepended(phoneNumber))
 
-        case AccountDeactivated(phoneNumber) =>
-          sendCommandToAccount(phoneNumber, AccountActor.Deactivate)
-          state
-
-        case AccountActivated(phoneNumber) =>
-          sendCommandToAccount(phoneNumber, AccountActor.Activate)
-          state
-
-        case UserDataChanged(firstName, lastName, email, dateOfBirth) =>
+        case UserDataChanged(firstName, lastName, dateOfBirth) =>
           state.copy(
             firstName = firstName.getOrElse(state.firstName),
             lastName = lastName.getOrElse(state.lastName),
-            email = email.getOrElse(state.email),
             dateOfBirth = dateOfBirth.getOrElse(state.dateOfBirth)
           )
       }
@@ -102,12 +81,11 @@ object UserActor {
 
     EventSourcedBehavior(
       PersistenceId(typeKey.name, entityId),
-      State(firstName = "", lastName = "", email = "", dateOfBirth = null, List()),
+      State(firstName = "", lastName = "", dateOfBirth = null, List()),
       commandHandler,
       eventHandler
     ).withRetention(RetentionCriteria.snapshotEvery(10, 3).withDeleteEventsOnSnapshot)
       .withTagger(_ => Set(tag))
       .onPersistFailure(SupervisorStrategy.restartWithBackoff(200.millis, 5.seconds, 0.1))
   }
-
 }

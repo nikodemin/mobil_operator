@@ -55,58 +55,62 @@ object AccountActor {
 
   def apply(entityId: EntityId): Behavior[Command] =
     Behaviors.setup { ctx =>
+      Behaviors.withTimers { timerScheduler =>
+        val chargePeriod = ConfigFactory.load().getLong("mobile-operator.charge-period")
+        val timerKey = "User actor"
 
-      val chargePeriod = ConfigFactory.load().getLong("mobile-operator.charge-period")
+        def calculateResidue(startDateTime: LocalDateTime, oldPrice: Int) =
+          (ChronoUnit.SECONDS.between(startDateTime, LocalDateTime.now()) * oldPrice / chargePeriod).toInt
 
-      def calculateResidue(startDateTime: LocalDateTime, oldPrice: Int) =
-        (ChronoUnit.SECONDS.between(startDateTime, LocalDateTime.now()) * oldPrice / chargePeriod).toInt
+        val commandHandler: (State, Command) => Effect[Event, State] = (state, cmd) => {
 
-      val commandHandler: (State, Command) => Effect[Event, State] = (state, cmd) => {
+          cmd match {
+            case Payment(amount) => Effect.persist(PaymentReceived(amount))
 
-        cmd match {
-          case Payment(amount) => Effect.persist(PaymentReceived(amount))
+            case TakeOff(amount) => Effect.persist(ChargedOff(amount))
+              .thenRun(_ => timerScheduler.startSingleTimer(timerKey,
+                TakeOff(state.pricingPlan), Duration(chargePeriod, SECONDS)))
 
-          case TakeOff(amount) => Effect.persist(ChargedOff(amount))
+            case SetPricingPlan(name, price) => Effect.persist(PricingPlanSet(name, price))
+              .thenRun(_ => ctx.self ! TakeOff(calculateResidue(state.lastTakeOffDate, state.pricingPlan)))
 
-          case SetPricingPlan(name, price) => Effect.persist(PricingPlanSet(name, price))
-            .thenRun(_ => ctx.self ! TakeOff(calculateResidue(state.lastTakeOffDate, state.pricingPlan)))
+            case Activate => Effect.persist(Activated)
 
-          case Activate => Effect.persist(Activated)
+            case Deactivate => Effect.persist(Deactivated)
 
-          case Deactivate => Effect.persist(Deactivated)
-
-          case Get(replyTo) => Effect.none.thenRun(replyTo ! _)
+            case Get(replyTo) => Effect.none.thenRun(replyTo ! _)
+          }
         }
+
+        val eventHandler: (State, Event) => State = (state, event) => event match {
+          case PaymentReceived(amount) => state.copy(
+            accountBalance = state.accountBalance + amount,
+            isActive = state.accountBalance + amount > 0
+          )
+
+          case ChargedOff(amount) => if (state.isActive) state.copy(
+            accountBalance = state.accountBalance - amount,
+            isActive = state.accountBalance > amount,
+            lastTakeOffDate = LocalDateTime.now()
+          ) else state
+
+          case PricingPlanSet(name, price) => state.copy(name, price)
+
+          case Activated => state.copy(isActive = true)
+
+          case Deactivated => state.copy(isActive = false)
+        }
+
+        EventSourcedBehavior(
+          PersistenceId(typeKey.name, entityId),
+          State(pricingPlanName = "", pricingPlan = 0, accountBalance = 0, lastTakeOffDate = LocalDateTime.now(),
+            isActive = true),
+          commandHandler,
+          eventHandler
+        ).withRetention(RetentionCriteria.snapshotEvery(10, 3)
+          .withDeleteEventsOnSnapshot)
+          .withTagger(_ => Set(tag))
+          .onPersistFailure(SupervisorStrategy.restartWithBackoff(200.millis, 5.seconds, 0.1))
       }
-
-      val eventHandler: (State, Event) => State = (state, event) => event match {
-        case PaymentReceived(amount) => state.copy(
-          accountBalance = state.accountBalance + amount,
-          isActive = state.accountBalance + amount > 0
-        )
-
-        case ChargedOff(amount) => if (state.isActive) state.copy(
-          accountBalance = state.accountBalance - amount,
-          isActive = state.accountBalance > amount,
-          lastTakeOffDate = LocalDateTime.now()
-        ) else state
-
-        case PricingPlanSet(name, price) => state.copy(name, price)
-
-        case Activated => state.copy(isActive = true)
-
-        case Deactivated => state.copy(isActive = false)
-      }
-
-      EventSourcedBehavior(
-        PersistenceId(typeKey.name, entityId),
-        State(pricingPlanName = "", pricingPlan = 0, accountBalance = 0, lastTakeOffDate = LocalDateTime.now(),
-          isActive = true),
-        commandHandler,
-        eventHandler
-      ).withRetention(RetentionCriteria.snapshotEvery(10, 3)
-        .withDeleteEventsOnSnapshot)
-        .withTagger(_ => Set(tag))
-        .onPersistFailure(SupervisorStrategy.restartWithBackoff(200.millis, 5.seconds, 0.1))
     }
 }
