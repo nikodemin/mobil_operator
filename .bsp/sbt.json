@@ -1,0 +1,17 @@
+{
+  "name": "sbt",
+  "version": "1.4.4",
+  "bspVersion": "2.0.0-M5",
+  "languages": [
+    "scala"
+  ],
+  "argv": [
+    "/usr/lib/jvm/java-14-openjdk/bin/java",
+    "-Xms100m",
+    "-Xmx100m",
+    "-classpath",
+    "/home/niko/.local/share/JetBrains/IntelliJIdea2020.1/Scala/launcher/sbt-launch.jar",
+    "xsbt.boot.Boot",
+    "-bsp"
+  ]
+}
