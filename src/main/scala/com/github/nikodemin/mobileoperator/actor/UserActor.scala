@@ -4,15 +4,17 @@ import java.time.LocalDate
 
 import akka.actor.typed.scaladsl.Behaviors
 import akka.actor.typed.{ActorRef, Behavior, SupervisorStrategy}
-import akka.cluster.sharding.typed.scaladsl.{ClusterSharding, Entity, EntityTypeKey}
+import akka.cluster.sharding.typed.delivery.ShardingProducerController.EntityId
+import akka.cluster.sharding.typed.scaladsl.{ClusterSharding, EntityTypeKey}
 import akka.persistence.typed.PersistenceId
 import akka.persistence.typed.scaladsl.{Effect, EventSourcedBehavior, RetentionCriteria}
+import com.github.nikodemin.mobileoperator.serialization.CborSerializable
 
 import scala.concurrent.duration._
 
 object UserActor {
 
-  sealed trait Command
+  sealed trait Command extends CborSerializable
 
   case class AddAccount(phoneNumber: String, pricingPlanName: String, pricingPlan: Int) extends Command
 
@@ -26,7 +28,7 @@ object UserActor {
   case class Get(replyTo: ActorRef[State]) extends Command
 
 
-  sealed trait Event
+  sealed trait Event extends CborSerializable
 
   case class AccountAdded(phoneNumber: String, pricingPlanName: String, pricingPlan: Int) extends Event
 
@@ -39,23 +41,16 @@ object UserActor {
 
 
   case class State(firstName: String, lastName: String, email: String, dateOfBirth: LocalDate,
-                   phoneNumbers: List[String])
+                   phoneNumbers: List[String]) extends CborSerializable
 
 
   val typeKey: EntityTypeKey[Command] = EntityTypeKey[Command]("UserActor")
 
   def entityId(email: String) = s"User actor, email: $email"
 
-  def entityIdQuery(email: String) = s"User actor query, email: $email"
-
-  def apply(firstName: String, lastName: String, email: String, dateOfBirth: LocalDate,
-            sharding: ClusterSharding, isQuery: Boolean): Behavior[Command] = Behaviors.setup { ctx =>
+  def apply(sharding: ClusterSharding, entityId: EntityId): Behavior[Command] = Behaviors.setup { ctx =>
 
     val commandHandler: (State, Command) => Effect[Event, State] = (_, cmd) => {
-      if (!isQuery) {
-        val query = sharding.entityRefFor(UserActor.typeKey, UserActor.entityIdQuery(email))
-        query ! cmd
-      }
 
       cmd match {
         case AddAccount(phoneNumber, pricingPlanName, pricingPlan) =>
@@ -82,12 +77,7 @@ object UserActor {
 
       event match {
         case AccountAdded(phoneNumber, pricingPlanName, pricingPlan) =>
-          sharding.init(Entity(AccountActor.typeKey) { _ =>
-            AccountActor(phoneNumber, pricingPlanName, pricingPlan, sharding, isQuery = false)
-          })
-          sharding.init(Entity(AccountActor.typeKey) { _ =>
-            AccountActor(phoneNumber, pricingPlanName, pricingPlan, sharding, isQuery = true)
-          })
+          sendCommandToAccount(phoneNumber, AccountActor.SetPricingPlan(pricingPlanName, pricingPlan))
           state.copy(phoneNumbers = state.phoneNumbers.prepended(phoneNumber))
 
         case AccountDeactivated(phoneNumber) =>
@@ -109,8 +99,8 @@ object UserActor {
     }
 
     EventSourcedBehavior(
-      PersistenceId(typeKey.name, if (isQuery) entityIdQuery(email) else entityId(email)),
-      State(firstName, lastName, email, dateOfBirth, List()),
+      PersistenceId(typeKey.name, entityId),
+      State(firstName = "", lastName = "", email = "", dateOfBirth = null, List()),
       commandHandler,
       eventHandler
     ).withRetention(RetentionCriteria.snapshotEvery(10, 3).withDeleteEventsOnSnapshot)

@@ -5,16 +5,18 @@ import java.time.temporal.ChronoUnit
 
 import akka.actor.typed.scaladsl.Behaviors
 import akka.actor.typed.{ActorRef, Behavior, SupervisorStrategy}
-import akka.cluster.sharding.typed.scaladsl.{ClusterSharding, EntityTypeKey}
+import akka.cluster.sharding.typed.delivery.ShardingProducerController.EntityId
+import akka.cluster.sharding.typed.scaladsl.EntityTypeKey
 import akka.persistence.typed.PersistenceId
 import akka.persistence.typed.scaladsl.{Effect, EventSourcedBehavior, RetentionCriteria}
+import com.github.nikodemin.mobileoperator.serialization.CborSerializable
 import com.typesafe.config.ConfigFactory
 
 import scala.concurrent.duration._
 
 object AccountActor {
 
-  sealed trait Command
+  sealed trait Command extends CborSerializable
 
   case class Payment(amount: Int) extends Command
 
@@ -29,7 +31,7 @@ object AccountActor {
   case class Get(replyTo: ActorRef[State]) extends Command
 
 
-  private sealed trait Event
+  private sealed trait Event extends CborSerializable
 
   private case class PaymentReceived(amount: Int) extends Event
 
@@ -43,28 +45,21 @@ object AccountActor {
 
 
   case class State(pricingPlanName: String, pricingPlan: Int, accountBalance: Long, lastTakeOffDate: LocalDateTime,
-                   isActive: Boolean)
+                   isActive: Boolean) extends CborSerializable
 
   val typeKey: EntityTypeKey[Command] = EntityTypeKey[Command]("AccountActor")
 
   def entityId(phoneNumber: String) = s"Account actor: $phoneNumber"
 
-  def entityIdQuery(phoneNumber: String) = s"Account actor query: $phoneNumber"
-
-  def apply(phoneNumber: String, pricingPlanName: String, pricingPlan: Int,
-            sharding: ClusterSharding, isQuery: Boolean): Behavior[Command] =
+  def apply(entityId: EntityId): Behavior[Command] =
     Behaviors.setup { ctx =>
 
-      val chargePeriod = ConfigFactory.load("mobile-operator").getLong("charge-period")
+      val chargePeriod = ConfigFactory.load().getLong("mobile-operator.charge-period")
 
       def calculateResidue(startDateTime: LocalDateTime, oldPrice: Int) =
         (ChronoUnit.SECONDS.between(startDateTime, LocalDateTime.now()) * oldPrice / chargePeriod).toInt
 
       val commandHandler: (State, Command) => Effect[Event, State] = (state, cmd) => {
-        if (!isQuery) {
-          val query = sharding.entityRefFor(AccountActor.typeKey, AccountActor.entityIdQuery(phoneNumber))
-          query ! cmd
-        }
 
         cmd match {
           case Payment(amount) => Effect.persist(PaymentReceived(amount))
@@ -102,11 +97,13 @@ object AccountActor {
       }
 
       EventSourcedBehavior(
-        PersistenceId(typeKey.name, if (isQuery) entityIdQuery(phoneNumber) else entityId(phoneNumber)),
-        State(pricingPlanName, pricingPlan, accountBalance = 0, lastTakeOffDate = null, isActive = true),
+        PersistenceId(typeKey.name, entityId),
+        State(pricingPlanName = "", pricingPlan = 0, accountBalance = 0, lastTakeOffDate = LocalDateTime.now(),
+          isActive = true),
         commandHandler,
         eventHandler
-      ).withRetention(RetentionCriteria.snapshotEvery(10, 3).withDeleteEventsOnSnapshot)
+      ).withRetention(RetentionCriteria.snapshotEvery(10, 3)
+        .withDeleteEventsOnSnapshot)
         .onPersistFailure(SupervisorStrategy.restartWithBackoff(200.millis, 5.seconds, 0.1))
     }
 }

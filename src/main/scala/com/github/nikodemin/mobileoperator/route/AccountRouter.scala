@@ -1,7 +1,7 @@
 package com.github.nikodemin.mobileoperator.route
 
 import akka.http.scaladsl.server.Route
-import com.github.nikodemin.mobileoperator.model.dto.AddAccountDto
+import com.github.nikodemin.mobileoperator.model.dto.AccountAddDto
 import com.github.nikodemin.mobileoperator.route.interfaces.BaseRouter
 import com.github.nikodemin.mobileoperator.route.util.Implicits._
 import com.github.nikodemin.mobileoperator.service.AccountService
@@ -19,7 +19,7 @@ class AccountRouter(accountService: AccountService)(implicit executionContext: E
 
   private val addAccount = accountEndpoint
     .post
-    .in(jsonBody[AddAccountDto])
+    .in(jsonBody[AccountAddDto])
     .out(jsonBody[Boolean])
 
   private val addAccountRoute = addAccount.toRoute(accountService.addAccount)

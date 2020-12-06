@@ -61,6 +61,7 @@ object BuildConfig {
     "com.typesafe.akka" %% "akka-persistence-typed" % versions.akka,
     "com.typesafe.akka" %% "akka-persistence-query" % versions.akka,
     "com.typesafe.akka" %% "akka-cluster-tools" % versions.akka,
+    "com.typesafe.akka" %% "akka-serialization-jackson" % versions.akka,
     "com.typesafe.akka" %% "akka-persistence-cassandra" % versions.akkaPersistenceCassandra,
     "com.typesafe.akka" %% "akka-persistence-cassandra-launcher" % versions.akkaPersistenceCassandra,
     "com.lightbend.akka.management" %% "akka-management" % versions.akkaManagementVersion,

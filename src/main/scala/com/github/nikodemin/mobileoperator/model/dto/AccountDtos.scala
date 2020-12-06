@@ -1,3 +1,3 @@
 package com.github.nikodemin.mobileoperator.model.dto
 
-case class AddAccountDto(email: String, phoneNumber: String, pricingPlanName: String, pricingPlan: Int)
+case class AccountAddDto(email: String, phoneNumber: String, pricingPlanName: String, pricingPlan: Int)

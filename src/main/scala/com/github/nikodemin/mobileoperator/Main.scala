@@ -4,11 +4,13 @@ import akka.actor.typed.ActorSystem
 import akka.actor.typed.scaladsl.Behaviors
 import akka.actor.typed.scaladsl.adapter._
 import akka.actor.{ActorSystem => ClassicActorSystem}
-import akka.cluster.sharding.typed.scaladsl.ClusterSharding
+import akka.cluster.sharding.typed.scaladsl.{ClusterSharding, Entity}
 import akka.cluster.typed.Cluster
 import akka.http.scaladsl.Http
 import akka.http.scaladsl.server.Directives._
 import akka.management.scaladsl.AkkaManagement
+import akka.util.Timeout
+import com.github.nikodemin.mobileoperator.actor.{AccountActor, UserActor}
 import com.github.nikodemin.mobileoperator.route.{AccountRouter, UserRouter}
 import com.github.nikodemin.mobileoperator.service._
 import com.typesafe.config.ConfigFactory
@@ -16,6 +18,7 @@ import sttp.tapir.docs.openapi._
 import sttp.tapir.openapi.circe.yaml._
 import sttp.tapir.swagger.akkahttp.SwaggerAkka
 
+import scala.concurrent.duration._
 import scala.io.StdIn
 
 object Main {
@@ -30,16 +33,18 @@ object Main {
       AkkaManagement(system).start()
     }
 
-    if (cluster.selfMember.roles("cmd")) {
+    sharding.init(Entity(AccountActor.typeKey) { entityContext =>
+      AccountActor(entityContext.entityId)
+    })
 
-    }
-
-    if (cluster.selfMember.roles("query")) {
-
-    }
+    sharding.init(Entity(UserActor.typeKey) { entityContext =>
+      UserActor(sharding, entityContext.entityId)
+    })
 
     implicit val classicSystem: ClassicActorSystem = system.toClassic
     import classicSystem.dispatcher
+
+    implicit val askTimeout: Timeout = Timeout(1.second)
 
     val accountService = new AccountService(sharding)
     val userService = new UserService(sharding)
