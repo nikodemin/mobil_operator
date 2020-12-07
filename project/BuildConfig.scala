@@ -22,6 +22,7 @@ object BuildConfig {
     val akkaPersistenceCassandra = "1.0.4"
     val akkaManagementVersion = "1.0.9"
     val akkaSprayJson = "10.2.0"
+    val `commons-io` = "2.4"
   }
 
   val testDependencies = Seq(
@@ -33,7 +34,8 @@ object BuildConfig {
     "com.github.alexarchambault" %% "scalacheck-shapeless_1.14" % versions.`scalacheck-shapeless_1.14`,
     "com.typesafe.akka" %% "akka-actor-testkit-typed" % versions.akka,
     "com.typesafe.akka" %% "akka-persistence-testkit" % versions.akka,
-    "com.typesafe.akka" %% "akka-stream-testkit" % versions.akka
+    "com.typesafe.akka" %% "akka-stream-testkit" % versions.akka,
+    "commons-io" % "commons-io" % versions.`commons-io`
   ).map(_ % Test)
 
   val circeDependencies = Seq(

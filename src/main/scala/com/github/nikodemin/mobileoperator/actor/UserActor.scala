@@ -59,11 +59,10 @@ object UserActor {
 
     val eventHandler: (State, Event) => State = (state, event) => {
 
-      def sendCommandToAccount(phoneNumber: String, message: AccountActor.Command): Unit =
-        if (state.phoneNumbers.contains(phoneNumber)) {
-          val account = sharding.entityRefFor(AccountActor.typeKey, AccountActor.entityId(phoneNumber))
-          account ! message
-        }
+      def sendCommandToAccount(phoneNumber: String, message: AccountActor.Command): Unit = {
+        val account = sharding.entityRefFor(AccountActor.typeKey, AccountActor.entityId(phoneNumber))
+        account ! message
+      }
 
       event match {
         case AccountAdded(phoneNumber, pricingPlanName, pricingPlan) =>
