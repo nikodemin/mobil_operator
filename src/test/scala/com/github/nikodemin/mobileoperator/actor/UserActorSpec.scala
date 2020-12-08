@@ -21,7 +21,7 @@ import scala.concurrent.Await
 import scala.concurrent.duration._
 import scala.util.Random
 
-class AccountActorSpec
+class UserActorSpec
   extends TestSuite
     with Matchers
     with BeforeAndAfterAll
@@ -32,15 +32,13 @@ class AccountActorSpec
   implicit private val patience: PatienceConfig =
     PatienceConfig(3.seconds, Span(100, org.scalatest.time.Millis))
 
-  private val databaseDirectory = new File("target/cassandra-AccountActorSpec")
+  private val databaseDirectory = new File("target/cassandra-UserActorSpec")
 
   // one TestKit (ActorSystem) per cluster node
-  private val testKit = ActorTestKit("AccountActorSpec", ConfigFactory.load)
-  private val testKit2 = ActorTestKit("AccountActorSpec", ConfigFactory.load)
+  private val testKit = ActorTestKit("UserActorSpec", ConfigFactory.load)
+  private val testKit2 = ActorTestKit("UserActorSpec", ConfigFactory.load)
 
   private val systems = List(testKit.system, testKit2.system)
-
-  private val probe = testKit.createTestProbe[AccountActor.State]()
 
   override protected def beforeAll(): Unit = {
     CassandraLauncher.start(
@@ -52,9 +50,15 @@ class AccountActorSpec
 
     // avoid concurrent creation of keyspace and tables
     initializePersistence()
-    systems.foreach(system => ClusterSharding(system).init(Entity(AccountActor.typeKey) { entityContext =>
-      AccountActor(entityContext.entityId)
-    }))
+    systems.foreach(system => {
+      val sharding = ClusterSharding(system)
+      sharding.init(Entity(UserActor.typeKey) { entityContext =>
+        UserActor(sharding, entityContext.entityId)
+      })
+      sharding.init(Entity(AccountActor.typeKey) { entityContext =>
+        AccountActor(entityContext.entityId)
+      })
+    })
     super.beforeAll()
   }
 
@@ -74,7 +78,7 @@ class AccountActorSpec
     FileUtils.deleteDirectory(databaseDirectory)
   }
 
-  private def generatePhoneNumber = Random.alphanumeric.filter(_.isDigit).take(11).mkString
+  private def generateEmail = Random.alphanumeric.filter(!_.isDigit).take(10).mkString
 
   "Account actor" should {
     "init and join Cluster" in {
@@ -93,67 +97,54 @@ class AccountActorSpec
       }
     }
 
-    "create account and get it from different node" in {
-      val pricingPlanName = "some pricicng plan"
+    "create new user and account" in {
+      val phoneNumber = "8 942 323 43 74"
+      val pricingPlanName = "some plan"
       val pricingPlan = 500
-      val phoneNumber = generatePhoneNumber
+      val email = generateEmail
+
+      val accountProbe = testKit.createTestProbe[AccountActor.State]
 
       val account = ClusterSharding(testKit.system).entityRefFor(AccountActor.typeKey,
         AccountActor.entityId(phoneNumber))
-      val account2 = ClusterSharding(testKit2.system).entityRefFor(AccountActor.typeKey,
-        AccountActor.entityId(phoneNumber))
+      val user = ClusterSharding(testKit2.system).entityRefFor(UserActor.typeKey,
+        UserActor.entityId(email))
 
-      account2 ! AccountActor.SetPricingPlan(pricingPlanName, pricingPlan)
+      user ! UserActor.AddAccount(phoneNumber, pricingPlanName, pricingPlan)
 
-      Thread.sleep(500)
+      Thread.sleep(1000)
 
-      account ! AccountActor.Get(probe.ref)
+      account ! AccountActor.Get(accountProbe.ref)
 
-      val actual = probe.receiveMessage()
+      val actualState = accountProbe.receiveMessage()
 
-      actual.pricingPlanName should ===(pricingPlanName)
-      actual.pricingPlan should ===(pricingPlan)
+      actualState.pricingPlanName should ===(pricingPlanName)
+      actualState.pricingPlan should ===(pricingPlan)
     }
 
-    "take charge after configured period" in {
-      val phoneNumber = generatePhoneNumber
-      val pricingPlan = 300
-      val payment = 2000
-      val expectedBalance = payment - pricingPlan
+    "change user data" in {
+      val email = generateEmail
+      val firstName = "first name"
+      val lastName = "last name"
+      val dateOfBirth = null
 
-      val account = ClusterSharding(testKit.system).entityRefFor(AccountActor.typeKey,
-        AccountActor.entityId(phoneNumber))
-      val account2 = ClusterSharding(testKit2.system).entityRefFor(AccountActor.typeKey,
-        AccountActor.entityId(phoneNumber))
+      val probe = testKit2.createTestProbe[UserActor.State]
 
-      account ! AccountActor.SetPricingPlan("plan", pricingPlan)
-      account2 ! AccountActor.Payment(payment)
+      val user = ClusterSharding(testKit.system).entityRefFor(UserActor.typeKey,
+        UserActor.entityId(email))
+      val user2 = ClusterSharding(testKit2.system).entityRefFor(UserActor.typeKey,
+        UserActor.entityId(email))
 
-      Thread.sleep(4000)
+      user ! UserActor.ChangeUserData(Some(firstName), Some(lastName), None)
 
-      account ! AccountActor.Get(probe.ref)
+      Thread.sleep(600)
 
-      probe.receiveMessage(2.seconds).accountBalance should ===(expectedBalance)
-    }
+      user2 ! UserActor.Get(probe.ref)
 
-    "activate and deactivate account" in {
-      val phoneNumber = generatePhoneNumber
-      val account = ClusterSharding(testKit.system).entityRefFor(AccountActor.typeKey,
-        AccountActor.entityId(phoneNumber))
-      val account2 = ClusterSharding(testKit2.system).entityRefFor(AccountActor.typeKey,
-        AccountActor.entityId(phoneNumber))
-
-      account2 ! AccountActor.Deactivate
-      Thread.sleep(300)
-
-      account ! AccountActor.Get(probe.ref)
-      probe.receiveMessage().isActive should ===(false)
-
-      account2 ! AccountActor.Activate
-      Thread.sleep(300)
-
-      account ! AccountActor.Get(probe.ref)
-      probe.receiveMessage().isActive should ===(true)
+      val actualState = probe.receiveMessage()
+      actualState.firstName should ===(firstName)
+      actualState.lastName should ===(lastName)
+      actualState.dateOfBirth should ===(dateOfBirth)
     }
   }
 }
