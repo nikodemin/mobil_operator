@@ -85,12 +85,12 @@ object AccountActor {
         val eventHandler: (State, Event) => State = (state, event) => event match {
           case PaymentReceived(amount) => state.copy(
             accountBalance = state.accountBalance + amount,
-            isActive = state.accountBalance + amount > 0
+            isActive = state.accountBalance + amount >= state.pricingPlan
           )
 
           case ChargedOff(amount) => if (state.isActive) state.copy(
             accountBalance = state.accountBalance - amount,
-            isActive = state.accountBalance > amount,
+            isActive = state.accountBalance - amount >= state.pricingPlan,
             lastTakeOffDate = LocalDateTime.now()
           ) else state
 
