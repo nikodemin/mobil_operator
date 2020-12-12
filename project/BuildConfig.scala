@@ -22,6 +22,7 @@ object BuildConfig {
     val akkaPersistenceCassandra = "1.0.4"
     val akkaManagementVersion = "1.0.9"
     val akkaSprayJson = "10.2.0"
+    val akkaProjection = "1.0.0"
     val `commons-io` = "2.4"
   }
 
@@ -68,6 +69,8 @@ object BuildConfig {
     "com.typesafe.akka" %% "akka-persistence-cassandra-launcher" % versions.akkaPersistenceCassandra,
     "com.lightbend.akka.management" %% "akka-management" % versions.akkaManagementVersion,
     "com.lightbend.akka.management" %% "akka-management-cluster-http" % versions.akkaManagementVersion,
+    "com.lightbend.akka" %% "akka-projection-cassandra" % versions.akkaProjection,
+    "com.lightbend.akka" %% "akka-projection-eventsourced" % versions.akkaProjection,
     "com.typesafe.akka" %% "akka-http-spray-json" % versions.akkaSprayJson
   )
 

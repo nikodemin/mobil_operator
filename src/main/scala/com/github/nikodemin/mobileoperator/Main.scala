@@ -4,21 +4,33 @@ import akka.actor.typed.ActorSystem
 import akka.actor.typed.scaladsl.Behaviors
 import akka.actor.typed.scaladsl.adapter._
 import akka.actor.{ActorSystem => ClassicActorSystem}
-import akka.cluster.sharding.typed.scaladsl.{ClusterSharding, Entity}
+import akka.cluster.sharding.typed.scaladsl.{ClusterSharding, Entity, ShardedDaemonProcess}
+import akka.cluster.sharding.typed.{ClusterShardingSettings, ShardedDaemonProcessSettings}
 import akka.cluster.typed.Cluster
 import akka.http.scaladsl.Http
 import akka.http.scaladsl.server.Directives._
+import akka.http.scaladsl.server.Route
 import akka.management.scaladsl.AkkaManagement
+import akka.persistence.cassandra.query.scaladsl.CassandraReadJournal
+import akka.projection.cassandra.scaladsl.CassandraProjection
+import akka.projection.eventsourced.scaladsl.EventSourcedProvider
+import akka.projection.{ProjectionBehavior, ProjectionId}
+import akka.stream.alpakka.cassandra.scaladsl.CassandraSessionRegistry
 import akka.util.Timeout
-import com.github.nikodemin.mobileoperator.actor.{AccountActor, UserActor}
-import com.github.nikodemin.mobileoperator.route.{AccountRouter, UserRouter}
-import com.github.nikodemin.mobileoperator.service._
+import com.github.nikodemin.mobileoperator.cmd.actor.{AccountActor, UserActor}
+import com.github.nikodemin.mobileoperator.cmd.route.{AccountRouter, UserRouter}
+import com.github.nikodemin.mobileoperator.cmd.service._
+import com.github.nikodemin.mobileoperator.query.handler.UserHandler
+import com.github.nikodemin.mobileoperator.query.projection.UserProjectionHandler
+import com.github.nikodemin.mobileoperator.query.route.{AccountQueryRouter, UserQueryRouter}
+import com.github.nikodemin.mobileoperator.query.service.{AccountQueryService, UserQueryService}
 import com.typesafe.config.ConfigFactory
 import sttp.tapir.docs.openapi._
 import sttp.tapir.openapi.circe.yaml._
 import sttp.tapir.swagger.akkahttp.SwaggerAkka
 
 import scala.concurrent.duration._
+import scala.concurrent.{Await, ExecutionContext}
 import scala.io.StdIn
 
 object Main {
@@ -26,6 +38,8 @@ object Main {
     val system = ActorSystem(Behaviors.empty, "mobile-operator-cluster")
     val sharding = ClusterSharding(system)
     val cluster = Cluster(system)
+    implicit val classicSystem: ClassicActorSystem = system.toClassic
+    import classicSystem.dispatcher
 
     val serverPort = ConfigFactory.load().getInt("mobile-operator.server-port")
 
@@ -41,9 +55,29 @@ object Main {
       UserActor(sharding, entityContext.entityId)
     })
 
-    implicit val classicSystem: ClassicActorSystem = system.toClassic
-    import classicSystem.dispatcher
+    val routes: Route = if (cluster.selfMember.roles("cmd")) {
+      initCommand(sharding)
+    } else if (cluster.selfMember.roles("query")) {
+      initQuery(system)
+    } else {
+      throw new IllegalStateException("Unsupported role")
+    }
 
+    val binding = Http().newServerAt("localhost", serverPort)
+      .bind(routes)
+
+    binding.foreach(b => println(s"Binding on ${b.localAddress}"))
+
+    StdIn.readLine()
+
+    binding.flatMap(_.unbind()).onComplete(_ => {
+      classicSystem.terminate
+      system.terminate
+    })
+  }
+
+  def initCommand(sharding: ClusterSharding)
+                 (implicit classicSystem: ClassicActorSystem, executionContext: ExecutionContext): Route = {
     implicit val askTimeout: Timeout = Timeout(1.second)
 
     val accountService = new AccountService(sharding)
@@ -54,18 +88,72 @@ object Main {
 
 
     val openApiYaml = (accountRouter.endpoints ++ userRouter.endpoints)
-      .toOpenAPI("Mobile operator", "1.0.0").toYaml
+      .toOpenAPI("Mobile operator command", "1.0.0").toYaml
 
-    val binding = Http().newServerAt("localhost", serverPort)
-      .bind(accountRouter.route ~ (new SwaggerAkka(openApiYaml)).routes ~ userRouter.route)
+    accountRouter.route ~ (new SwaggerAkka(openApiYaml)).routes ~ userRouter.route
+  }
 
-    binding.foreach(b => println(s"Binding on ${b.localAddress}"))
+  def initQuery(system: ActorSystem[Nothing])
+               (implicit executionContext: ExecutionContext): Route = {
+    createTables(system)
 
-    StdIn.readLine()
+    val userSourceProvider = EventSourcedProvider
+      .eventsByTag[UserActor.Event](
+        system,
+        readJournalPluginId = CassandraReadJournal.Identifier,
+        tag = UserActor.tag)
 
-    binding.flatMap(_.unbind()).onComplete(_ => {
-      classicSystem.terminate
-      system.terminate
-    })
+    val userProjection = CassandraProjection.atLeastOnce(
+      projectionId = ProjectionId("users", UserActor.tag),
+      userSourceProvider,
+      handler = () => new UserProjectionHandler(new UserHandler))
+
+    val shardingSettings = ClusterShardingSettings(system)
+    val shardedDaemonProcessSettings =
+      ShardedDaemonProcessSettings(system).withShardingSettings(shardingSettings.withRole("query"))
+
+    ShardedDaemonProcess(system).init(
+      name = "users",
+      1,
+      _ => ProjectionBehavior(userProjection),
+      shardedDaemonProcessSettings,
+      Some(ProjectionBehavior.Stop))
+
+    val userService = new UserQueryService
+    val accountService = new AccountQueryService
+
+    val userRouter = new UserQueryRouter(userService)
+    val accountRouter = new AccountQueryRouter(accountService)
+
+    val openApiYaml = (accountRouter.endpoints ++ userRouter.endpoints)
+      .toOpenAPI("Mobile operator query", "1.0.0").toYaml
+
+    accountRouter.route ~ (new SwaggerAkka(openApiYaml)).routes ~ userRouter.route
+  }
+
+  def createTables(system: ActorSystem[_]): Unit = {
+    val session =
+      CassandraSessionRegistry(system).sessionFor("alpakka.cassandra")
+
+    val keyspaceStmt =
+      """
+      CREATE KEYSPACE IF NOT EXISTS mobile_operator_offset
+      WITH REPLICATION = { 'class' : 'SimpleStrategy', 'replication_factor' : 1 }
+      """
+
+    val offsetTableStmt =
+      """
+      CREATE TABLE IF NOT EXISTS mobile_operator_offset.offset_store (
+        projection_name text,
+        partition int,
+        projection_key text,
+        offset text,
+        manifest text,
+        last_updated timestamp,
+        PRIMARY KEY ((projection_name, partition), projection_key)
+      )
+      """
+    Await.ready(session.executeDDL(keyspaceStmt), 10.seconds)
+    Await.ready(session.executeDDL(offsetTableStmt), 10.seconds)
   }
 }
