@@ -20,11 +20,15 @@ import akka.util.Timeout
 import com.github.nikodemin.mobileoperator.cmd.actor.{AccountActor, UserActor}
 import com.github.nikodemin.mobileoperator.cmd.route.{AccountRouter, UserRouter}
 import com.github.nikodemin.mobileoperator.cmd.service._
-import com.github.nikodemin.mobileoperator.query.handler.UserHandler
-import com.github.nikodemin.mobileoperator.query.projection.UserProjectionHandler
+import com.github.nikodemin.mobileoperator.query.config.DbConfig
+import com.github.nikodemin.mobileoperator.query.dao.{AccountDao, UserDao}
+import com.github.nikodemin.mobileoperator.query.handler.{AccountHandler, UserHandler}
+import com.github.nikodemin.mobileoperator.query.projection.{AccountProjectionHandler, UserProjectionHandler}
 import com.github.nikodemin.mobileoperator.query.route.{AccountQueryRouter, UserQueryRouter}
 import com.github.nikodemin.mobileoperator.query.service.{AccountQueryService, UserQueryService}
 import com.typesafe.config.ConfigFactory
+import org.flywaydb.core.Flyway
+import slick.jdbc.PostgresProfile.api._
 import sttp.tapir.docs.openapi._
 import sttp.tapir.openapi.circe.yaml._
 import sttp.tapir.swagger.akkahttp.SwaggerAkka
@@ -55,7 +59,7 @@ object Main {
       UserActor(sharding, entityContext.entityId)
     })
 
-    val routes: Route = if (cluster.selfMember.roles("cmd")) {
+    val (routes, db) = if (cluster.selfMember.roles("cmd")) {
       initCommand(sharding)
     } else if (cluster.selfMember.roles("query")) {
       initQuery(system)
@@ -71,13 +75,14 @@ object Main {
     StdIn.readLine()
 
     binding.flatMap(_.unbind()).onComplete(_ => {
+      db.foreach(_.close())
       classicSystem.terminate
       system.terminate
     })
   }
 
   def initCommand(sharding: ClusterSharding)
-                 (implicit classicSystem: ClassicActorSystem, executionContext: ExecutionContext): Route = {
+                 (implicit classicSystem: ClassicActorSystem, executionContext: ExecutionContext): (Route, Option[Database]) = {
     implicit val askTimeout: Timeout = Timeout(1.second)
 
     val accountService = new AccountService(sharding)
@@ -90,23 +95,46 @@ object Main {
     val openApiYaml = (accountRouter.endpoints ++ userRouter.endpoints)
       .toOpenAPI("Mobile operator command", "1.0.0").toYaml
 
-    accountRouter.route ~ (new SwaggerAkka(openApiYaml)).routes ~ userRouter.route
+    (accountRouter.route ~ (new SwaggerAkka(openApiYaml)).routes ~ userRouter.route, None)
   }
 
   def initQuery(system: ActorSystem[Nothing])
-               (implicit executionContext: ExecutionContext): Route = {
+               (implicit executionContext: ExecutionContext): (Route, Option[Database]) = {
     createTables(system)
+
+    val config = DbConfig.default
+
+    implicit val db: Database = Database.forURL(config.dbUrl, config.dbUserName, config.dbPassword)
+
+    Flyway
+      .configure()
+      .dataSource(config.dbUrl, config.dbUserName, config.dbPassword)
+      .load()
+      .migrate()
 
     val userSourceProvider = EventSourcedProvider
       .eventsByTag[UserActor.Event](
         system,
         readJournalPluginId = CassandraReadJournal.Identifier,
         tag = UserActor.tag)
+    val accountSourceProvider = EventSourcedProvider
+      .eventsByTag[AccountActor.Event](
+        system,
+        readJournalPluginId = CassandraReadJournal.Identifier,
+        tag = AccountActor.tag)
+
+    val userDao = new UserDao
+    val accountDao = new AccountDao
 
     val userProjection = CassandraProjection.atLeastOnce(
       projectionId = ProjectionId("users", UserActor.tag),
       userSourceProvider,
-      handler = () => new UserProjectionHandler(new UserHandler))
+      handler = () => new UserProjectionHandler(new UserHandler(userDao, accountDao)))
+    val accountProjection = CassandraProjection.atLeastOnce(
+      projectionId = ProjectionId("accounts", AccountActor.tag),
+      accountSourceProvider,
+      handler = () => new AccountProjectionHandler(new AccountHandler(accountDao))
+    )
 
     val shardingSettings = ClusterShardingSettings(system)
     val shardedDaemonProcessSettings =
@@ -119,6 +147,13 @@ object Main {
       shardedDaemonProcessSettings,
       Some(ProjectionBehavior.Stop))
 
+    ShardedDaemonProcess(system).init(
+      name = "accounts",
+      1,
+      _ => ProjectionBehavior(accountProjection),
+      shardedDaemonProcessSettings,
+      Some(ProjectionBehavior.Stop))
+
     val userService = new UserQueryService
     val accountService = new AccountQueryService
 
@@ -128,10 +163,11 @@ object Main {
     val openApiYaml = (accountRouter.endpoints ++ userRouter.endpoints)
       .toOpenAPI("Mobile operator query", "1.0.0").toYaml
 
-    accountRouter.route ~ (new SwaggerAkka(openApiYaml)).routes ~ userRouter.route
+    (accountRouter.route ~ (new SwaggerAkka(openApiYaml)).routes ~ userRouter.route, Some(db))
   }
 
   def createTables(system: ActorSystem[_]): Unit = {
+
     val session =
       CassandraSessionRegistry(system).sessionFor("alpakka.cassandra")
 

@@ -24,6 +24,10 @@ object BuildConfig {
     val akkaSprayJson = "10.2.0"
     val akkaProjection = "1.0.0"
     val `commons-io` = "2.4"
+
+    val slick = "3.3.3"
+    val postgresql = "42.2.15"
+    val `flyway-core` = "6.5.5"
   }
 
   val testDependencies = Seq(
@@ -74,6 +78,16 @@ object BuildConfig {
     "com.typesafe.akka" %% "akka-http-spray-json" % versions.akkaSprayJson
   )
 
+  val slickDependencies = Seq(
+    "com.typesafe.slick" %% "slick" % versions.slick,
+    "com.typesafe.slick" %% "slick-hikaricp" % versions.slick
+  )
+
+  val dbDependencies = Seq(
+    "org.postgresql" % "postgresql" % versions.postgresql,
+    "org.flywaydb" % "flyway-core" % versions.`flyway-core`
+  )
+
   val projectDependencies: Seq[ModuleID] = testDependencies ++ circeDependencies ++
-    logDependencies ++ tapirDependencies ++ akkaDependencies
+    logDependencies ++ tapirDependencies ++ akkaDependencies ++ slickDependencies ++ dbDependencies
 }

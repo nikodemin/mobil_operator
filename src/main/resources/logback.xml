@@ -6,15 +6,7 @@
         </encoder>
     </appender>
 
-    <logger name="com.example" level="debug" additivity="false">
-        <appender-ref ref="console"/>
-    </logger>
-
-    <logger name="akka" level="info" additivity="false">
-        <appender-ref ref="console"/>
-    </logger>
-
-    <root level="warn">
+    <root level="INFO">
         <appender-ref ref="console"/>
     </root>
 

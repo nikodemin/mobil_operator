@@ -31,17 +31,17 @@ object AccountActor {
   case class Get(replyTo: ActorRef[State]) extends Command
 
 
-  private sealed trait Event extends CborSerializable
+   sealed trait Event extends CborSerializable
 
-  private case class PaymentReceived(amount: Int) extends Event
+  case class PaymentReceived(phoneNumber: String, amount: Int) extends Event
 
-  private case class ChargedOff(amount: Int) extends Event
+  case class ChargedOff(phoneNumber: String, amount: Int, dateTime: LocalDateTime) extends Event
 
-  private case class PricingPlanSet(name: String, price: Int) extends Event
+  case class PricingPlanSet(phoneNumber: String, name: String, price: Int) extends Event
 
-  private object Deactivated extends Event
+  case class Deactivated(phoneNumber: String) extends Event
 
-  private object Activated extends Event
+  case class Activated(phoneNumber: String) extends Event
 
 
   case class State(pricingPlanName: String, pricingPlan: Int, accountBalance: Long, lastTakeOffDate: LocalDateTime,
@@ -51,7 +51,7 @@ object AccountActor {
 
   val tag = "Account actor"
 
-  def entityId(phoneNumber: String) = s"$tag, phone number: $phoneNumber"
+  def entityId(phoneNumber: String) = phoneNumber
 
   def apply(entityId: EntityId): Behavior[Command] =
     Behaviors.setup { ctx =>
@@ -65,40 +65,40 @@ object AccountActor {
         val commandHandler: (State, Command) => Effect[Event, State] = (state, cmd) => {
 
           cmd match {
-            case Payment(amount) => Effect.persist(PaymentReceived(amount))
+            case Payment(amount) => Effect.persist(PaymentReceived(entityId, amount))
 
-            case TakeOff(amount) => Effect.persist(ChargedOff(amount))
+            case TakeOff(amount) => Effect.persist(ChargedOff(entityId, amount, LocalDateTime.now()))
               .thenRun(_ => timerScheduler.startSingleTimer(timerKey,
                 TakeOff(state.pricingPlan), Duration(chargePeriod, SECONDS)))
 
-            case SetPricingPlan(name, price) => Effect.persist(PricingPlanSet(name, price))
+            case SetPricingPlan(name, price) => Effect.persist(PricingPlanSet(entityId, name, price))
               .thenRun(_ => ctx.self ! TakeOff(calculateResidue(state.lastTakeOffDate, state.pricingPlan)))
 
-            case Activate => Effect.persist(Activated)
+            case Activate => Effect.persist(Activated(entityId))
 
-            case Deactivate => Effect.persist(Deactivated)
+            case Deactivate => Effect.persist(Deactivated(entityId))
 
             case Get(replyTo) => Effect.none.thenRun(replyTo ! _)
           }
         }
 
         val eventHandler: (State, Event) => State = (state, event) => event match {
-          case PaymentReceived(amount) => state.copy(
+          case PaymentReceived(email, amount) => state.copy(
             accountBalance = state.accountBalance + amount,
             isActive = state.accountBalance + amount >= state.pricingPlan
           )
 
-          case ChargedOff(amount) => if (state.isActive) state.copy(
+          case ChargedOff(email, amount, dateTime) => if (state.isActive) state.copy(
             accountBalance = state.accountBalance - amount,
             isActive = state.accountBalance - amount >= state.pricingPlan,
-            lastTakeOffDate = LocalDateTime.now()
+            lastTakeOffDate = dateTime
           ) else state
 
-          case PricingPlanSet(name, price) => state.copy(name, price)
+          case PricingPlanSet(email, name, price) => state.copy(name, price)
 
-          case Activated => state.copy(isActive = true)
+          case Activated(email) => state.copy(isActive = true)
 
-          case Deactivated => state.copy(isActive = false)
+          case Deactivated(email) => state.copy(isActive = false)
         }
 
         EventSourcedBehavior(

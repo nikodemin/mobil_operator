@@ -4,21 +4,31 @@ import java.time.LocalDate
 
 import akka.Done
 import akka.event.slf4j.SLF4JLogging
+import com.github.nikodemin.mobileoperator.query.dao.{AccountDao, UserDao}
 
 import scala.concurrent.{ExecutionContext, Future}
 
-class UserHandler(implicit executionContext: ExecutionContext) extends SLF4JLogging {
+final class UserHandler(userDao: UserDao, accountDao: AccountDao)
+                       (implicit executionContext: ExecutionContext) extends SLF4JLogging {
 
-  def addPhoneNumber(phoneNumber: String): Future[Done] = Future {
-    log.info(s"addPhoneNUmber: $phoneNumber")
-    println(s"addPhoneNUmber: $phoneNumber")
+  def addPhoneNumber(email: String, phoneNumber: String, retryCount: Int = 3): Future[Done] =
+    accountDao.addAccount(email, phoneNumber).flatMap { res =>
+      if (!res) {
+        log.error(s"AddPhoneNumber event is not persisted. Retry count: $retryCount")
 
-    Done
-  }
+        if (retryCount > 0) addPhoneNumber(email, phoneNumber, retryCount - 1) else
+          Future.failed(new IllegalStateException("AddPhoneNumber event is not persisted: retryCount is zero"))
+      } else Future(Done)
+    }
 
-  def changeUserData(firstName: Option[String], lastName: Option[String], dateOfBirth: Option[LocalDate]): Future[Done] = Future {
-    log.info(s"changeUserData firstName: $firstName, lastName: $lastName, dateOfBirth: $dateOfBirth")
-    println(s"changeUserData firstName: $firstName, lastName: $lastName, dateOfBirth: $dateOfBirth")
-    Done
-  }
+  def changeUserData(email: String, firstName: Option[String], lastName: Option[String],
+                     dateOfBirth: Option[LocalDate], retryCount: Int = 3): Future[Done] =
+    userDao.changeOrAddUser(email, firstName, lastName, dateOfBirth).flatMap { res =>
+      if (!res) {
+        log.error(s"ChangeUserData event is not persisted. Retry count: $retryCount")
+
+        if (retryCount > 0) changeUserData(email, firstName, lastName, dateOfBirth, retryCount - 1) else
+          Future.failed(new IllegalStateException("ChangeUserData event is not persisted: retryCount is zero"))
+      } else Future(Done)
+    }
 }

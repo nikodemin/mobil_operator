@@ -12,8 +12,10 @@ class UserProjectionHandler(userHandler: UserHandler) extends Handler[EventEnvel
 
   override def process(envelope: EventEnvelope[UserActor.Event]): Future[Done] = {
     envelope.event match {
-      case UserActor.AccountAdded(phoneNumber, pricingPlanName, pricingPlan) => userHandler.addPhoneNumber(phoneNumber)
-      case UserActor.UserDataChanged(firstName, lastName, dateOfBirth) => userHandler.changeUserData(firstName, lastName, dateOfBirth)
+      case UserActor.AccountAdded(email, phoneNumber, pricingPlanName, pricingPlan) =>
+        userHandler.addPhoneNumber(email, phoneNumber)
+      case UserActor.UserDataChanged(email, firstName, lastName, dateOfBirth) =>
+        userHandler.changeUserData(email, firstName, lastName, dateOfBirth)
     }
   }
 }

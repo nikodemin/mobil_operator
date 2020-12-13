@@ -26,9 +26,9 @@ object UserActor {
 
   sealed trait Event extends CborSerializable
 
-  case class AccountAdded(phoneNumber: String, pricingPlanName: String, pricingPlan: Int) extends Event
+  case class AccountAdded(email: String, phoneNumber: String, pricingPlanName: String, pricingPlan: Int) extends Event
 
-  case class UserDataChanged(firstName: Option[String], lastName: Option[String],
+  case class UserDataChanged(email: String, firstName: Option[String], lastName: Option[String],
                              dateOfBirth: Option[LocalDate]) extends Event
 
 
@@ -40,7 +40,7 @@ object UserActor {
 
   val tag = "User Actor"
 
-  def entityId(email: String) = s"$tag, email: $email"
+  def entityId(email: String): String = email
 
   def apply(sharding: ClusterSharding, entityId: EntityId): Behavior[Command] = Behaviors.setup { ctx =>
 
@@ -48,10 +48,10 @@ object UserActor {
 
       cmd match {
         case AddAccount(phoneNumber, pricingPlanName, pricingPlan) =>
-          Effect.persist(AccountAdded(phoneNumber, pricingPlanName, pricingPlan))
+          Effect.persist(AccountAdded(entityId, phoneNumber, pricingPlanName, pricingPlan))
 
         case ChangeUserData(firstName, lastName, dateOfBirth) =>
-          Effect.persist(UserDataChanged(firstName, lastName, dateOfBirth))
+          Effect.persist(UserDataChanged(entityId, firstName, lastName, dateOfBirth))
 
         case Get(replyTo) => Effect.none.thenRun(replyTo ! _)
       }
@@ -65,11 +65,11 @@ object UserActor {
       }
 
       event match {
-        case AccountAdded(phoneNumber, pricingPlanName, pricingPlan) =>
+        case AccountAdded(email, phoneNumber, pricingPlanName, pricingPlan) =>
           sendCommandToAccount(phoneNumber, AccountActor.SetPricingPlan(pricingPlanName, pricingPlan))
           state.copy(phoneNumbers = state.phoneNumbers.prepended(phoneNumber))
 
-        case UserDataChanged(firstName, lastName, dateOfBirth) =>
+        case UserDataChanged(email, firstName, lastName, dateOfBirth) =>
           state.copy(
             firstName = firstName.getOrElse(state.firstName),
             lastName = lastName.getOrElse(state.lastName),

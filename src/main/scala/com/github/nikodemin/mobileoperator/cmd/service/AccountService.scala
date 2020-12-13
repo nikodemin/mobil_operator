@@ -41,12 +41,6 @@ class AccountService(sharding: ClusterSharding)
     true
   }
 
-  def takeOff(phoneNumber: String, amount: Int) = Future {
-    val account = sharding.entityRefFor(AccountActor.typeKey, AccountActor.entityId(phoneNumber))
-    account ! AccountActor.TakeOff(amount)
-    true
-  }
-
   def setPricingPlan(phoneNumber: String, pricingPlan: SetPricingPlanDto) = Future {
     val account = sharding.entityRefFor(AccountActor.typeKey, AccountActor.entityId(phoneNumber))
     account ! pricingPlan.toCommand

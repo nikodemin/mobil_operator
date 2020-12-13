@@ -15,9 +15,9 @@ import scala.concurrent.ExecutionContext
 
 class AccountRouter(accountService: AccountService)(implicit executionContext: ExecutionContext) extends BaseRouter {
   override lazy val endpoints: List[Endpoint[_, _, _, _]] = List(addAccount, activateAccount, deactivateAccount,
-    getByPhoneNumber, pay, takeOff, setPricingPlan)
+    getByPhoneNumber, pay, setPricingPlan)
   override lazy val route: Route = addAccountRoute ~ activateAccountRoute ~ deactivateAccountRoute ~
-    getByPhoneNumberRoute ~ payRoute ~ takeOffRoute ~ setPricingPlanRoute
+    getByPhoneNumberRoute ~ payRoute ~ setPricingPlanRoute
 
   private val accountEndpoint = endpoint.in("account").tag("account")
 
@@ -64,17 +64,6 @@ class AccountRouter(accountService: AccountService)(implicit executionContext: E
     .out(jsonBody[Boolean])
 
   private val payRoute = pay.toRoute(entry => accountService.pay(entry._1, entry._2))
-
-  private val takeOff = accountEndpoint
-    .put
-    .in("takeOff")
-    .in("phoneNumber")
-    .in(path[String]("phoneNumber"))
-    .in("amount")
-    .in(path[Int]("amount"))
-    .out(jsonBody[Boolean])
-
-  private val takeOffRoute = pay.toRoute(entry => accountService.takeOff(entry._1, entry._2))
 
   private val setPricingPlan = accountEndpoint
     .put
