@@ -24,14 +24,16 @@ class AccountQueryRouter(accountService: AccountQueryService)
   private val getByQuery = accountEndpoint
     .post
     .name("Get using query")
+    .in("query")
     .in(jsonBody[AccountQueryDto])
     .out(jsonBody[Seq[AccountResponseDto]])
 
   private val getByQueryRoute = getByQuery.toRoute(accountService.getByQueryDto)
 
   private val getByLastTakeOffDateBetween = accountEndpoint
-    .get
+    .post
     .name("Get by last take off date")
+    .in("take off date")
     .in(jsonBody[AccountGetByLastTakeOffDate])
     .out(jsonBody[Seq[AccountResponseDto]])
 

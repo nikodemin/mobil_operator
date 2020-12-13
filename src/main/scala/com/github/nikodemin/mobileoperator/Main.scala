@@ -47,6 +47,8 @@ object Main {
 
     val serverPort = ConfigFactory.load().getInt("mobile-operator.server-port")
 
+    implicit val askTimeout: Timeout = Timeout(10.seconds)
+
     if (cluster.selfMember.roles("management")) {
       AkkaManagement(system).start()
     }
@@ -82,9 +84,7 @@ object Main {
   }
 
   def initCommand(sharding: ClusterSharding)
-                 (implicit classicSystem: ClassicActorSystem, executionContext: ExecutionContext): (Route, Option[Database]) = {
-    implicit val askTimeout: Timeout = Timeout(1.second)
-
+                 (implicit classicSystem: ClassicActorSystem, executionContext: ExecutionContext, askTimeout: Timeout): (Route, Option[Database]) = {
     val accountService = new AccountService(sharding)
     val userService = new UserService(sharding)
 

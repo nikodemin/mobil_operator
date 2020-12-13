@@ -41,7 +41,8 @@ object UserActor {
 
   def entityId(email: String): String = email
 
-  def apply(sharding: ClusterSharding, entityId: EntityId): Behavior[Command] = Behaviors.setup { ctx =>
+  def apply(sharding: ClusterSharding, entityId: EntityId)
+           (implicit askTimeout: Timeout): Behavior[Command] = Behaviors.setup { ctx =>
 
     val commandHandler: (State, Command) => Effect[Event, State] = (_, cmd) => {
 
@@ -61,7 +62,6 @@ object UserActor {
       event match {
         case AccountAdded(email, phoneNumber, pricingPlanName, pricingPlan) =>
           val account = sharding.entityRefFor(AccountActor.typeKey, AccountActor.entityId(phoneNumber))
-          implicit val timeout: Timeout = Timeout(10.seconds)
 
           ctx.ask(account, (ref: ActorRef[AccountActor.State]) => AccountActor.SetPricingPlan(pricingPlanName,
             pricingPlan, ref))(_)

@@ -24,6 +24,7 @@ class UserQueryRouter(userService: UserQueryService)
   private val getByQuery = userEndpoint
     .post
     .name("Get using query")
+    .in("query")
     .in(jsonBody[UserQueryDto])
     .out(jsonBody[Seq[UserResponseDto]])
 
