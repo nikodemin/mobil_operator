@@ -8,6 +8,7 @@ import akka.cluster.sharding.typed.delivery.ShardingProducerController.EntityId
 import akka.cluster.sharding.typed.scaladsl.{ClusterSharding, EntityTypeKey}
 import akka.persistence.typed.PersistenceId
 import akka.persistence.typed.scaladsl.{Effect, EventSourcedBehavior, RetentionCriteria}
+import akka.util.Timeout
 import com.github.nikodemin.mobileoperator.common.serialization.CborSerializable
 
 import scala.concurrent.duration._
@@ -16,12 +17,10 @@ object UserActor {
 
   sealed trait Command extends CborSerializable
 
-  case class AddAccount(phoneNumber: String, pricingPlanName: String, pricingPlan: Int) extends Command
+  case class AddAccount(phoneNumber: String, pricingPlanName: String, pricingPlan: Int, replyTo: ActorRef[State]) extends Command
 
   case class ChangeUserData(firstName: Option[String], lastName: Option[String],
-                            dateOfBirth: Option[LocalDate]) extends Command
-
-  case class Get(replyTo: ActorRef[State]) extends Command
+                            dateOfBirth: Option[LocalDate], replyTo: ActorRef[State]) extends Command
 
 
   sealed trait Event extends CborSerializable
@@ -47,26 +46,26 @@ object UserActor {
     val commandHandler: (State, Command) => Effect[Event, State] = (_, cmd) => {
 
       cmd match {
-        case AddAccount(phoneNumber, pricingPlanName, pricingPlan) =>
+        case AddAccount(phoneNumber, pricingPlanName, pricingPlan, replyTo) =>
           Effect.persist(AccountAdded(entityId, phoneNumber, pricingPlanName, pricingPlan))
+            .thenRun(replyTo ! _)
 
-        case ChangeUserData(firstName, lastName, dateOfBirth) =>
+        case ChangeUserData(firstName, lastName, dateOfBirth, replyTo) =>
           Effect.persist(UserDataChanged(entityId, firstName, lastName, dateOfBirth))
-
-        case Get(replyTo) => Effect.none.thenRun(replyTo ! _)
+            .thenRun(replyTo ! _)
       }
     }
 
     val eventHandler: (State, Event) => State = (state, event) => {
 
-      def sendCommandToAccount(phoneNumber: String, message: AccountActor.Command): Unit = {
-        val account = sharding.entityRefFor(AccountActor.typeKey, AccountActor.entityId(phoneNumber))
-        account ! message
-      }
-
       event match {
         case AccountAdded(email, phoneNumber, pricingPlanName, pricingPlan) =>
-          sendCommandToAccount(phoneNumber, AccountActor.SetPricingPlan(pricingPlanName, pricingPlan))
+          val account = sharding.entityRefFor(AccountActor.typeKey, AccountActor.entityId(phoneNumber))
+          implicit val timeout: Timeout = Timeout(10.seconds)
+
+          ctx.ask(account, (ref: ActorRef[AccountActor.State]) => AccountActor.SetPricingPlan(pricingPlanName,
+            pricingPlan, ref))(_)
+
           state.copy(phoneNumbers = state.phoneNumbers.prepended(phoneNumber))
 
         case UserDataChanged(email, firstName, lastName, dateOfBirth) =>

@@ -3,6 +3,7 @@ package com.github.nikodemin.mobileoperator.query.dao
 import java.time.LocalDateTime
 
 import com.github.nikodemin.mobileoperator.query.dao.util.Implicits._
+import com.github.nikodemin.mobileoperator.query.model.dto.AccountQueryDto
 import com.github.nikodemin.mobileoperator.query.model.entity.QueryEntities._
 import slick.jdbc.PostgresProfile.api._
 
@@ -32,6 +33,18 @@ class AccountDao(implicit db: Database, executionContext: ExecutionContext) {
   def addAccount(email: String, phoneNumber: String): Future[Boolean] =
     accounts += AccountRow(phoneNumber, email, "", 0, 0L, LocalDateTime.now(), isActive = false)
 
+  def getByQueryDto(accountQueryDto: AccountQueryDto): Future[Seq[AccountRow]] =
+    accounts.filterOpt(accountQueryDto.isActive)((a, isActive) => a.isActive === isActive)
+      .filterOpt(accountQueryDto.phoneNumber)((a, phoneNumber) => a.phoneNumber === phoneNumber)
+      .filterOpt(accountQueryDto.pricingPlanName)((a, pricingPlanName) => a.pricingPlanName === pricingPlanName)
+      .filterOpt(accountQueryDto.pricingPlan)((a, pricingPlan) => a.pricingPlan === pricingPlan)
+      .result
+
+  def getByLastTakeOffDateBetween(start: LocalDateTime, end: LocalDateTime): Future[Seq[AccountRow]] =
+    accounts.filter(_.lastTakeOffDate.between(start, end)).result
+
+  def getByBalanceLowerThat(balance: Long): Future[Seq[AccountRow]] =
+    accounts.filter(_.accountBalance < balance).result
 
   private def getAccount(phoneNumber: String): Query[Account, AccountRow, Seq] =
     accounts.filter(_.phoneNumber === phoneNumber)

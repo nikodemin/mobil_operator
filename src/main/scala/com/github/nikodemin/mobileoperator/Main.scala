@@ -154,8 +154,8 @@ object Main {
       shardedDaemonProcessSettings,
       Some(ProjectionBehavior.Stop))
 
-    val userService = new UserQueryService
-    val accountService = new AccountQueryService
+    val userService = new UserQueryService(userDao)
+    val accountService = new AccountQueryService(accountDao)
 
     val userRouter = new UserQueryRouter(userService)
     val accountRouter = new AccountQueryRouter(accountService)

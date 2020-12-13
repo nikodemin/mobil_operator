@@ -3,47 +3,36 @@ package com.github.nikodemin.mobileoperator.cmd.service
 import akka.actor.typed.ActorRef
 import akka.cluster.sharding.typed.scaladsl.ClusterSharding
 import akka.util.Timeout
-import com.github.nikodemin.mobileoperator.cmd.actor.AccountActor.State
-import com.github.nikodemin.mobileoperator.cmd.actor.{AccountActor, UserActor}
-import com.github.nikodemin.mobileoperator.cmd.model.dto.{AccountAddDto, AccountGetDto, SetPricingPlanDto}
+import com.github.nikodemin.mobileoperator.cmd.actor.AccountActor
+import com.github.nikodemin.mobileoperator.cmd.actor.AccountActor.{Activate, Deactivate, Payment, State}
+import com.github.nikodemin.mobileoperator.cmd.model.dto.{AccountResponseDto, SetPricingPlanDto}
 
 import scala.concurrent.{ExecutionContext, Future}
 
 class AccountService(sharding: ClusterSharding)
                     (implicit executionContext: ExecutionContext, timeout: Timeout) {
-  def addAccount(addAccountDto: AccountAddDto) = Future.apply {
-    val user = sharding.entityRefFor(UserActor.typeKey, UserActor.entityId(addAccountDto.email))
-    user ! addAccountDto.toCommand
-    true
+
+  def activateAccount(phoneNumber: String): Future[AccountResponseDto] = {
+    val account = sharding.entityRefFor(AccountActor.typeKey, AccountActor.entityId(phoneNumber))
+
+    account.ask((ref: ActorRef[State]) => Activate(ref)).map(AccountResponseDto.fromState(_, phoneNumber))
   }
 
-  def activateAccount(phoneNumber: String) = Future {
+  def deactivateAccount(phoneNumber: String): Future[AccountResponseDto] = {
     val account = sharding.entityRefFor(AccountActor.typeKey, AccountActor.entityId(phoneNumber))
-    account ! AccountActor.Activate
-    true
+
+    account.ask((ref: ActorRef[State]) => Deactivate(ref)).map(AccountResponseDto.fromState(_, phoneNumber))
   }
 
-  def deactivateAccount(phoneNumber: String) = Future {
+  def pay(phoneNumber: String, amount: Int): Future[AccountResponseDto] = {
     val account = sharding.entityRefFor(AccountActor.typeKey, AccountActor.entityId(phoneNumber))
-    account ! AccountActor.Deactivate
-    true
+
+    account.ask((ref: ActorRef[State]) => Payment(amount, ref)).map(AccountResponseDto.fromState(_, phoneNumber))
   }
 
-  def getByPhoneNumber(phoneNumber: String) = {
+  def setPricingPlan(phoneNumber: String, pricingPlan: SetPricingPlanDto): Future[AccountResponseDto] = {
     val account = sharding.entityRefFor(AccountActor.typeKey, AccountActor.entityId(phoneNumber))
-    account.ask((ref: ActorRef[State]) => AccountActor.Get(ref))
-      .map(AccountGetDto.fromState(_, phoneNumber))
-  }
 
-  def pay(phoneNumber: String, amount: Int) = Future {
-    val account = sharding.entityRefFor(AccountActor.typeKey, AccountActor.entityId(phoneNumber))
-    account ! AccountActor.Payment(amount)
-    true
-  }
-
-  def setPricingPlan(phoneNumber: String, pricingPlan: SetPricingPlanDto) = Future {
-    val account = sharding.entityRefFor(AccountActor.typeKey, AccountActor.entityId(phoneNumber))
-    account ! pricingPlan.toCommand
-    true
+    account.ask((ref: ActorRef[State]) => pricingPlan.toCommand(ref)).map(AccountResponseDto.fromState(_, phoneNumber))
   }
 }

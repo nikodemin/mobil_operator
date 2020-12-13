@@ -18,20 +18,18 @@ object AccountActor {
 
   sealed trait Command extends CborSerializable
 
-  case class Payment(amount: Int) extends Command
+  case class Payment(amount: Int, replyTo: ActorRef[State]) extends Command
 
-  case class TakeOff(amount: Int) extends Command
+  private case class TakeOff(amount: Int) extends Command
 
-  case class SetPricingPlan(name: String, price: Int) extends Command
+  case class SetPricingPlan(name: String, price: Int, replyTo: ActorRef[State]) extends Command
 
-  object Deactivate extends Command
+  case class Deactivate(replyTo: ActorRef[State]) extends Command
 
-  object Activate extends Command
-
-  case class Get(replyTo: ActorRef[State]) extends Command
+  case class Activate(replyTo: ActorRef[State]) extends Command
 
 
-   sealed trait Event extends CborSerializable
+  sealed trait Event extends CborSerializable
 
   case class PaymentReceived(phoneNumber: String, amount: Int) extends Event
 
@@ -65,20 +63,22 @@ object AccountActor {
         val commandHandler: (State, Command) => Effect[Event, State] = (state, cmd) => {
 
           cmd match {
-            case Payment(amount) => Effect.persist(PaymentReceived(entityId, amount))
+            case Payment(amount, replyTo) => Effect.persist(PaymentReceived(entityId, amount))
+              .thenRun(replyTo ! _)
 
             case TakeOff(amount) => Effect.persist(ChargedOff(entityId, amount, LocalDateTime.now()))
               .thenRun(_ => timerScheduler.startSingleTimer(timerKey,
                 TakeOff(state.pricingPlan), Duration(chargePeriod, SECONDS)))
 
-            case SetPricingPlan(name, price) => Effect.persist(PricingPlanSet(entityId, name, price))
-              .thenRun(_ => ctx.self ! TakeOff(calculateResidue(state.lastTakeOffDate, state.pricingPlan)))
+            case SetPricingPlan(name, price, replyTo) => Effect.persist(PricingPlanSet(entityId, name, price))
+              .thenRun((_: State) => ctx.self ! TakeOff(calculateResidue(state.lastTakeOffDate, state.pricingPlan)))
+              .thenRun(replyTo ! _)
 
-            case Activate => Effect.persist(Activated(entityId))
+            case Activate(replyTo) => Effect.persist(Activated(entityId))
+              .thenRun(replyTo ! _)
 
-            case Deactivate => Effect.persist(Deactivated(entityId))
-
-            case Get(replyTo) => Effect.none.thenRun(replyTo ! _)
+            case Deactivate(replyTo) => Effect.persist(Deactivated(entityId))
+              .thenRun(replyTo ! _)
           }
         }
 
