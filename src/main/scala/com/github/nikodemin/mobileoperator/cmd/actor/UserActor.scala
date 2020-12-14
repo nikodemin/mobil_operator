@@ -51,7 +51,7 @@ object UserActor {
 
       cmd match {
         case AddAccount(phoneNumber, pricingPlanName, pricingPlan, replyTo) =>
-          if (state.phoneNumbers.contains(phoneNumber)) {
+          if (state.phoneNumbers.contains(phoneNumber) || !state.isInitialized) {
             Effect.none
               .thenRun(replyTo ! _)
           } else {
@@ -88,7 +88,7 @@ object UserActor {
 
     EventSourcedBehavior(
       PersistenceId(typeKey.name, entityId),
-      State(firstName = "", lastName = "", dateOfBirth = null, Set(), isInitialized = false),
+      State(firstName = "", lastName = "", dateOfBirth = LocalDate.now, Set(), isInitialized = false),
       commandHandler,
       eventHandler
     ).withRetention(RetentionCriteria.snapshotEvery(10, 3).withDeleteEventsOnSnapshot)
