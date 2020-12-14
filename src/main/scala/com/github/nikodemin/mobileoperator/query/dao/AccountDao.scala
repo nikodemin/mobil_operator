@@ -10,13 +10,23 @@ import slick.jdbc.PostgresProfile.api._
 import scala.concurrent.{ExecutionContext, Future}
 
 class AccountDao(implicit db: Database, executionContext: ExecutionContext) {
-  def pay(phoneNumber: String, amount: Int): Future[Boolean] = getAccount(phoneNumber)
-    .map(a => a.accountBalance)
-    .update(amount)
+  def pay(phoneNumber: String, amount: Int): Future[Boolean] = {
+    val accountFuture: Future[Option[AccountRow]] = getAccount(phoneNumber).result.headOption
 
-  def takeOff(phoneNumber: String, amount: Int, dateTime: LocalDateTime): Future[Boolean] = getAccount(phoneNumber)
-    .map(a => (a.accountBalance, a.lastTakeOffDate))
-    .update((amount, dateTime))
+    accountFuture.flatMap(_.fold(Future(0)) { account =>
+      getAccount(phoneNumber).map(_.accountBalance).update(account.accountBalance + amount)
+    }.map(_ > 0))
+  }
+
+  def takeOff(phoneNumber: String, amount: Int, dateTime: LocalDateTime): Future[Boolean] = {
+    val accountFuture: Future[Option[AccountRow]] = getAccount(phoneNumber).result.headOption
+
+    accountFuture.flatMap(_.fold(Future(0)) { account =>
+      getAccount(phoneNumber)
+        .map(a => (a.accountBalance, a.lastTakeOffDate))
+        .update((account.accountBalance - amount, dateTime))
+    }.map(_ > 0))
+  }
 
   def setPricingPlan(phoneNumber: String, name: String, price: Int): Future[Boolean] = getAccount(phoneNumber)
     .map(a => (a.pricingPlanName, a.pricingPlan))

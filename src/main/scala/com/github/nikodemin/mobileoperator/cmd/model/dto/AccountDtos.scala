@@ -14,5 +14,5 @@ object AccountResponseDto {
 }
 
 case class SetPricingPlanDto(name: String, price: Int) {
-  def toCommand(ref: ActorRef[State]) = SetPricingPlan(name, price, ref)
+  def toCommand(ref: ActorRef[State]) = SetPricingPlan(name, price, Some(ref))
 }

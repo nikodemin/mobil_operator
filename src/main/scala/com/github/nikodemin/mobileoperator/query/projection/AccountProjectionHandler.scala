@@ -14,7 +14,7 @@ class AccountProjectionHandler(accountHandler: AccountHandler) extends Handler[E
     case AccountActor.PaymentReceived(phoneNumber, amount) => accountHandler.pay(phoneNumber, amount)
     case AccountActor.ChargedOff(phoneNumber, amount, dateTime) => accountHandler.takeOff(phoneNumber, amount, dateTime)
     case AccountActor.PricingPlanSet(phoneNumber, name, price) => accountHandler.setPricingPlan(phoneNumber, name, price)
-    case AccountActor.Deactivated(phoneNumber) => accountHandler.activate(phoneNumber)
-    case AccountActor.Activated(phoneNumber) => accountHandler.deactivate(phoneNumber)
+    case AccountActor.Deactivated(phoneNumber) => accountHandler.deactivate(phoneNumber)
+    case AccountActor.Activated(phoneNumber) => accountHandler.activate(phoneNumber)
   }
 }

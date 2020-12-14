@@ -11,6 +11,7 @@ import akka.persistence.typed.scaladsl.{Effect, EventSourcedBehavior, RetentionC
 import akka.util.Timeout
 import com.github.nikodemin.mobileoperator.common.serialization.CborSerializable
 
+import scala.concurrent.ExecutionContext
 import scala.concurrent.duration._
 
 object UserActor {
@@ -22,6 +23,8 @@ object UserActor {
   case class ChangeUserData(firstName: Option[String], lastName: Option[String],
                             dateOfBirth: Option[LocalDate], replyTo: ActorRef[State]) extends Command
 
+  case class Get(replyTo: ActorRef[State]) extends Command
+
 
   sealed trait Event extends CborSerializable
 
@@ -32,7 +35,7 @@ object UserActor {
 
 
   case class State(firstName: String, lastName: String, dateOfBirth: LocalDate,
-                   phoneNumbers: List[String]) extends CborSerializable
+                   phoneNumbers: Set[String], isInitialized: Boolean) extends CborSerializable
 
 
   val typeKey: EntityTypeKey[Command] = EntityTypeKey[Command]("UserActor")
@@ -42,18 +45,26 @@ object UserActor {
   def entityId(email: String): String = email
 
   def apply(sharding: ClusterSharding, entityId: EntityId)
-           (implicit askTimeout: Timeout): Behavior[Command] = Behaviors.setup { ctx =>
+           (implicit askTimeout: Timeout, executionContext: ExecutionContext): Behavior[Command] = Behaviors.setup { ctx =>
 
-    val commandHandler: (State, Command) => Effect[Event, State] = (_, cmd) => {
+    val commandHandler: (State, Command) => Effect[Event, State] = (state, cmd) => {
 
       cmd match {
         case AddAccount(phoneNumber, pricingPlanName, pricingPlan, replyTo) =>
-          Effect.persist(AccountAdded(entityId, phoneNumber, pricingPlanName, pricingPlan))
-            .thenRun(replyTo ! _)
+          if (state.phoneNumbers.contains(phoneNumber)) {
+            Effect.none
+              .thenRun(replyTo ! _)
+          } else {
+            Effect.persist(AccountAdded(entityId, phoneNumber, pricingPlanName, pricingPlan))
+              .thenRun(replyTo ! _)
+          }
 
         case ChangeUserData(firstName, lastName, dateOfBirth, replyTo) =>
           Effect.persist(UserDataChanged(entityId, firstName, lastName, dateOfBirth))
             .thenRun(replyTo ! _)
+
+        case Get(replyTo) => Effect.none
+          .thenRun(replyTo ! _)
       }
     }
 
@@ -62,24 +73,22 @@ object UserActor {
       event match {
         case AccountAdded(email, phoneNumber, pricingPlanName, pricingPlan) =>
           val account = sharding.entityRefFor(AccountActor.typeKey, AccountActor.entityId(phoneNumber))
-
-          ctx.ask(account, (ref: ActorRef[AccountActor.State]) => AccountActor.SetPricingPlan(pricingPlanName,
-            pricingPlan, ref))(_)
-
-          state.copy(phoneNumbers = state.phoneNumbers.prepended(phoneNumber))
+          account ! AccountActor.SetPricingPlan(pricingPlanName, pricingPlan)
+          state.copy(phoneNumbers = state.phoneNumbers + phoneNumber)
 
         case UserDataChanged(email, firstName, lastName, dateOfBirth) =>
           state.copy(
             firstName = firstName.getOrElse(state.firstName),
             lastName = lastName.getOrElse(state.lastName),
-            dateOfBirth = dateOfBirth.getOrElse(state.dateOfBirth)
+            dateOfBirth = dateOfBirth.getOrElse(state.dateOfBirth),
+            isInitialized = true
           )
       }
     }
 
     EventSourcedBehavior(
       PersistenceId(typeKey.name, entityId),
-      State(firstName = "", lastName = "", dateOfBirth = null, List()),
+      State(firstName = "", lastName = "", dateOfBirth = null, Set(), isInitialized = false),
       commandHandler,
       eventHandler
     ).withRetention(RetentionCriteria.snapshotEvery(10, 3).withDeleteEventsOnSnapshot)

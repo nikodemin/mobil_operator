@@ -15,19 +15,19 @@ class AccountService(sharding: ClusterSharding)
   def activateAccount(phoneNumber: String): Future[AccountResponseDto] = {
     val account = sharding.entityRefFor(AccountActor.typeKey, AccountActor.entityId(phoneNumber))
 
-    account.ask((ref: ActorRef[State]) => Activate(ref)).map(AccountResponseDto.fromState(_, phoneNumber))
+    account.ask((ref: ActorRef[State]) => Activate(Some(ref))).map(AccountResponseDto.fromState(_, phoneNumber))
   }
 
   def deactivateAccount(phoneNumber: String): Future[AccountResponseDto] = {
     val account = sharding.entityRefFor(AccountActor.typeKey, AccountActor.entityId(phoneNumber))
 
-    account.ask((ref: ActorRef[State]) => Deactivate(ref)).map(AccountResponseDto.fromState(_, phoneNumber))
+    account.ask((ref: ActorRef[State]) => Deactivate(Some(ref))).map(AccountResponseDto.fromState(_, phoneNumber))
   }
 
   def pay(phoneNumber: String, amount: Int): Future[AccountResponseDto] = {
     val account = sharding.entityRefFor(AccountActor.typeKey, AccountActor.entityId(phoneNumber))
 
-    account.ask((ref: ActorRef[State]) => Payment(amount, ref)).map(AccountResponseDto.fromState(_, phoneNumber))
+    account.ask((ref: ActorRef[State]) => Payment(amount, Some(ref))).map(AccountResponseDto.fromState(_, phoneNumber))
   }
 
   def setPricingPlan(phoneNumber: String, pricingPlan: SetPricingPlanDto): Future[AccountResponseDto] = {

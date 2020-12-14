@@ -9,7 +9,7 @@ import com.github.nikodemin.mobileoperator.cmd.actor.UserActor.{AddAccount, Stat
 case class UserAddDto(firstName: String, lastName: String, email: String, dateOfBirth: LocalDate)
 
 case class UserResponseDto(firstName: String, lastName: String, email: String, dateOfBirth: LocalDate,
-                           phoneNumbers: List[String])
+                           phoneNumbers: Set[String])
 
 object UserResponseDto {
   def fromState(state: State, email: String) = UserResponseDto(state.firstName, state.lastName, email, state.dateOfBirth,

@@ -9,6 +9,7 @@ import akka.cluster.sharding.typed.delivery.ShardingProducerController.EntityId
 import akka.cluster.sharding.typed.scaladsl.EntityTypeKey
 import akka.persistence.typed.PersistenceId
 import akka.persistence.typed.scaladsl.{Effect, EventSourcedBehavior, RetentionCriteria}
+import akka.util.Timeout
 import com.github.nikodemin.mobileoperator.common.serialization.CborSerializable
 import com.typesafe.config.ConfigFactory
 
@@ -18,15 +19,15 @@ object AccountActor {
 
   sealed trait Command extends CborSerializable
 
-  case class Payment(amount: Int, replyTo: ActorRef[State]) extends Command
+  case class Payment(amount: Int, replyTo: Option[ActorRef[State]] = None) extends Command
 
   private case class TakeOff(amount: Int) extends Command
 
-  case class SetPricingPlan(name: String, price: Int, replyTo: ActorRef[State]) extends Command
+  case class SetPricingPlan(name: String, price: Int, replyTo: Option[ActorRef[State]] = None) extends Command
 
-  case class Deactivate(replyTo: ActorRef[State]) extends Command
+  case class Deactivate(replyTo: Option[ActorRef[State]] = None) extends Command
 
-  case class Activate(replyTo: ActorRef[State]) extends Command
+  case class Activate(replyTo: Option[ActorRef[State]] = None) extends Command
 
 
   sealed trait Event extends CborSerializable
@@ -51,7 +52,8 @@ object AccountActor {
 
   def entityId(phoneNumber: String) = phoneNumber
 
-  def apply(entityId: EntityId): Behavior[Command] =
+  def apply(entityId: EntityId)
+           (implicit askTimeout: Timeout): Behavior[Command] =
     Behaviors.setup { ctx =>
       Behaviors.withTimers { timerScheduler =>
         val chargePeriod = ConfigFactory.load().getLong("mobile-operator.charge-period")
@@ -64,21 +66,35 @@ object AccountActor {
 
           cmd match {
             case Payment(amount, replyTo) => Effect.persist(PaymentReceived(entityId, amount))
-              .thenRun(replyTo ! _)
+              .thenRun((state: State) => replyTo.foreach(_ ! state))
+              .thenRun(newState => if (newState.isActive && !state.isActive) {
+                timerScheduler.startSingleTimer(timerKey, TakeOff(state.pricingPlan), Duration(chargePeriod, SECONDS))
+                ctx.self ! Activate()
+              })
 
-            case TakeOff(amount) => Effect.persist(ChargedOff(entityId, amount, LocalDateTime.now()))
-              .thenRun(_ => timerScheduler.startSingleTimer(timerKey,
-                TakeOff(state.pricingPlan), Duration(chargePeriod, SECONDS)))
+            case TakeOff(amount) => if (state.isActive) {
+              Effect.persist(ChargedOff(entityId, amount, LocalDateTime.now()))
+                .thenRun { newState =>
+                  if (newState.isActive) {
+                    timerScheduler.startSingleTimer(timerKey,
+                      TakeOff(state.pricingPlan), Duration(chargePeriod, SECONDS))
+                  } else {
+                    ctx.self ! Deactivate()
+                  }
+                }
+            } else {
+              Effect.none
+            }
 
             case SetPricingPlan(name, price, replyTo) => Effect.persist(PricingPlanSet(entityId, name, price))
               .thenRun((_: State) => ctx.self ! TakeOff(calculateResidue(state.lastTakeOffDate, state.pricingPlan)))
-              .thenRun(replyTo ! _)
+              .thenRun(state => replyTo.foreach(_ ! state))
 
             case Activate(replyTo) => Effect.persist(Activated(entityId))
-              .thenRun(replyTo ! _)
+              .thenRun(state => replyTo.foreach(_ ! state))
 
             case Deactivate(replyTo) => Effect.persist(Deactivated(entityId))
-              .thenRun(replyTo ! _)
+              .thenRun(state => replyTo.foreach(_ ! state))
           }
         }
 
@@ -88,11 +104,11 @@ object AccountActor {
             isActive = state.accountBalance + amount >= state.pricingPlan
           )
 
-          case ChargedOff(email, amount, dateTime) => if (state.isActive) state.copy(
+          case ChargedOff(email, amount, dateTime) => state.copy(
             accountBalance = state.accountBalance - amount,
             isActive = state.accountBalance - amount >= state.pricingPlan,
             lastTakeOffDate = dateTime
-          ) else state
+          )
 
           case PricingPlanSet(email, name, price) => state.copy(name, price)
 

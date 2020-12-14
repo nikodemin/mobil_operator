@@ -14,11 +14,14 @@ class UserService(sharding: ClusterSharding)
   def addUser(addUserDto: UserAddDto): Future[UserResponseDto] = {
     val user = sharding.entityRefFor(UserActor.typeKey, UserActor.entityId(addUserDto.email))
 
-    user.ask((ref: ActorRef[State]) => UserActor.ChangeUserData(
-      firstName = Some(addUserDto.firstName),
-      lastName = Some(addUserDto.lastName),
-      dateOfBirth = Some(addUserDto.dateOfBirth),
-      ref)).map(UserResponseDto.fromState(_, addUserDto.email))
+    user.ask((ref: ActorRef[State]) => UserActor.Get(ref)).flatMap { state =>
+      if (state.isInitialized) Future(state) else
+        user.ask((ref: ActorRef[State]) => UserActor.ChangeUserData(
+          firstName = Some(addUserDto.firstName),
+          lastName = Some(addUserDto.lastName),
+          dateOfBirth = Some(addUserDto.dateOfBirth),
+          ref))
+    }.map(UserResponseDto.fromState(_, addUserDto.email))
   }
 
   def addAccount(addAccountDto: AccountAddDto): Future[UserResponseDto] = {
