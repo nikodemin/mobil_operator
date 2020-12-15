@@ -60,7 +60,7 @@ object AccountActor {
         val timerKey = "User actor"
 
         def calculateResidue(startDateTime: LocalDateTime, oldPrice: Int) =
-          (ChronoUnit.SECONDS.between(startDateTime, LocalDateTime.now()) * oldPrice / chargePeriod).toInt
+          (ChronoUnit.SECONDS.between(startDateTime, LocalDateTime.now()) * oldPrice.toFloat / chargePeriod).toInt
 
         val commandHandler: (State, Command) => Effect[Event, State] = (state, cmd) => {
 
