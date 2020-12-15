@@ -80,7 +80,7 @@ class UserActorSpec
 
   private def generateEmail = Random.alphanumeric.filter(!_.isDigit).take(10).mkString
 
-  "Account actor" should {
+  "User actor" should {
     "init and join Cluster" in {
       testKit.spawn[Nothing](Behaviors.empty, "guardian")
 
