@@ -9,6 +9,7 @@ import akka.cluster.sharding.typed.scaladsl.{ClusterSharding, Entity}
 import akka.cluster.typed.{Cluster, Join}
 import akka.persistence.cassandra.testkit.CassandraLauncher
 import akka.persistence.testkit.scaladsl.PersistenceInit.initializeDefaultPlugins
+import akka.util.Timeout
 import com.typesafe.config.ConfigFactory
 import org.apache.commons.io.FileUtils
 import org.scalatest.concurrent.{Eventually, PatienceConfiguration, ScalaFutures}
@@ -36,13 +37,11 @@ class AccountActorSpec
 
   // one TestKit (ActorSystem) per cluster node
   private val testKit = ActorTestKit("AccountActorSpec", ConfigFactory.load)
-  private val testKit2 = ActorTestKit("AccountActorSpec", ConfigFactory.load)
-
-  private val systems = List(testKit.system, testKit2.system)
-
   private val probe = testKit.createTestProbe[AccountActor.State]()
 
   override protected def beforeAll(): Unit = {
+    implicit val askTimeout: Timeout = Timeout(5.seconds)
+
     CassandraLauncher.start(
       databaseDirectory,
       CassandraLauncher.DefaultTestConfigResource,
@@ -52,9 +51,9 @@ class AccountActorSpec
 
     // avoid concurrent creation of keyspace and tables
     initializePersistence()
-    systems.foreach(system => ClusterSharding(system).init(Entity(AccountActor.typeKey) { entityContext =>
+    ClusterSharding(testKit.system).init(Entity(AccountActor.typeKey) { entityContext =>
       AccountActor(entityContext.entityId)
-    }))
+    })
     super.beforeAll()
   }
 
@@ -67,7 +66,6 @@ class AccountActorSpec
   override protected def afterAll(): Unit = {
     super.afterAll()
 
-    testKit2.shutdownTestKit()
     testKit.shutdownTestKit()
 
     CassandraLauncher.stop()
@@ -79,35 +77,24 @@ class AccountActorSpec
   "Account actor" should {
     "init and join Cluster" in {
       testKit.spawn[Nothing](Behaviors.empty, "guardian")
-      testKit2.spawn[Nothing](Behaviors.empty, "guardian")
 
-      systems.foreach { sys =>
-        Cluster(sys).manager ! Join(Cluster(testKit.system).selfMember.address)
-      }
+      Cluster(testKit.system).manager ! Join(Cluster(testKit.system).selfMember.address)
 
       // let the nodes join and become Up
       eventually(PatienceConfiguration.Timeout(10.seconds)) {
-        systems.foreach { sys =>
-          Cluster(sys).selfMember.status should ===(MemberStatus.Up)
-        }
+        Cluster(testKit.system).selfMember.status should ===(MemberStatus.Up)
       }
     }
 
-    "create account and get it from different node" in {
+    "set pricing plan" in {
       val pricingPlanName = "some pricicng plan"
       val pricingPlan = 500
       val phoneNumber = generatePhoneNumber
 
       val account = ClusterSharding(testKit.system).entityRefFor(AccountActor.typeKey,
         AccountActor.entityId(phoneNumber))
-      val account2 = ClusterSharding(testKit2.system).entityRefFor(AccountActor.typeKey,
-        AccountActor.entityId(phoneNumber))
 
-      account2 ! AccountActor.SetPricingPlan(pricingPlanName, pricingPlan)
-
-      Thread.sleep(500)
-
-      account ! AccountActor.Get(probe.ref)
+      account ! AccountActor.SetPricingPlan(pricingPlanName, pricingPlan, Some(probe.ref))
 
       val actual = probe.receiveMessage()
 
@@ -123,15 +110,15 @@ class AccountActorSpec
 
       val account = ClusterSharding(testKit.system).entityRefFor(AccountActor.typeKey,
         AccountActor.entityId(phoneNumber))
-      val account2 = ClusterSharding(testKit2.system).entityRefFor(AccountActor.typeKey,
-        AccountActor.entityId(phoneNumber))
 
-      account ! AccountActor.SetPricingPlan("plan", pricingPlan)
-      account2 ! AccountActor.Payment(payment)
+      account ! AccountActor.SetPricingPlan("plan", pricingPlan, Some(probe.ref))
+      probe.expectMessageType[AccountActor.State]
+
+      account ! AccountActor.Payment(payment)
 
       Thread.sleep(4000)
 
-      account ! AccountActor.Get(probe.ref)
+      account ! AccountActor.Activate(Some(probe.ref))
 
       probe.receiveMessage(2.seconds).accountBalance should ===(expectedBalance)
     }
@@ -140,19 +127,11 @@ class AccountActorSpec
       val phoneNumber = generatePhoneNumber
       val account = ClusterSharding(testKit.system).entityRefFor(AccountActor.typeKey,
         AccountActor.entityId(phoneNumber))
-      val account2 = ClusterSharding(testKit2.system).entityRefFor(AccountActor.typeKey,
-        AccountActor.entityId(phoneNumber))
 
-      account2 ! AccountActor.Deactivate
-      Thread.sleep(300)
-
-      account ! AccountActor.Get(probe.ref)
+      account ! AccountActor.Deactivate(Some(probe.ref))
       probe.receiveMessage().isActive should ===(false)
 
-      account2 ! AccountActor.Activate
-      Thread.sleep(300)
-
-      account ! AccountActor.Get(probe.ref)
+      account ! AccountActor.Activate(Some(probe.ref))
       probe.receiveMessage().isActive should ===(true)
     }
   }

@@ -1,6 +1,7 @@
 package com.github.nikodemin.mobileoperator.cmd.actor
 
 import java.io.File
+import java.time.LocalDate
 
 import akka.actor.testkit.typed.scaladsl.ActorTestKit
 import akka.actor.typed.scaladsl.Behaviors
@@ -9,6 +10,7 @@ import akka.cluster.sharding.typed.scaladsl.{ClusterSharding, Entity}
 import akka.cluster.typed.{Cluster, Join}
 import akka.persistence.cassandra.testkit.CassandraLauncher
 import akka.persistence.testkit.scaladsl.PersistenceInit.initializeDefaultPlugins
+import akka.util.Timeout
 import com.typesafe.config.ConfigFactory
 import org.apache.commons.io.FileUtils
 import org.scalatest.concurrent.{Eventually, PatienceConfiguration, ScalaFutures}
@@ -36,11 +38,12 @@ class UserActorSpec
 
   // one TestKit (ActorSystem) per cluster node
   private val testKit = ActorTestKit("UserActorSpec", ConfigFactory.load)
-  private val testKit2 = ActorTestKit("UserActorSpec", ConfigFactory.load)
-
-  private val systems = List(testKit.system, testKit2.system)
+  private val probe = testKit.createTestProbe[UserActor.State]
 
   override protected def beforeAll(): Unit = {
+    implicit val askTimeout: Timeout = Timeout(5.seconds)
+    import scala.concurrent.ExecutionContext.Implicits.global
+
     CassandraLauncher.start(
       databaseDirectory,
       CassandraLauncher.DefaultTestConfigResource,
@@ -48,17 +51,15 @@ class UserActorSpec
       port = 19042,
       CassandraLauncher.classpathForResources("logback-test.xml"))
 
-    // avoid concurrent creation of keyspace and tables
     initializePersistence()
-    systems.foreach(system => {
-      val sharding = ClusterSharding(system)
-      sharding.init(Entity(UserActor.typeKey) { entityContext =>
-        UserActor(sharding, entityContext.entityId)
-      })
-      sharding.init(Entity(AccountActor.typeKey) { entityContext =>
-        AccountActor(entityContext.entityId)
-      })
+    val sharding = ClusterSharding(testKit.system)
+    sharding.init(Entity(UserActor.typeKey) { entityContext =>
+      UserActor(sharding, entityContext.entityId)
     })
+    sharding.init(Entity(AccountActor.typeKey) { entityContext =>
+      AccountActor(entityContext.entityId)
+    })
+
     super.beforeAll()
   }
 
@@ -71,7 +72,6 @@ class UserActorSpec
   override protected def afterAll(): Unit = {
     super.afterAll()
 
-    testKit2.shutdownTestKit()
     testKit.shutdownTestKit()
 
     CassandraLauncher.stop()
@@ -83,63 +83,67 @@ class UserActorSpec
   "Account actor" should {
     "init and join Cluster" in {
       testKit.spawn[Nothing](Behaviors.empty, "guardian")
-      testKit2.spawn[Nothing](Behaviors.empty, "guardian")
 
-      systems.foreach { sys =>
-        Cluster(sys).manager ! Join(Cluster(testKit.system).selfMember.address)
-      }
+      Cluster(testKit.system).manager ! Join(Cluster(testKit.system).selfMember.address)
 
       // let the nodes join and become Up
       eventually(PatienceConfiguration.Timeout(10.seconds)) {
-        systems.foreach { sys =>
-          Cluster(sys).selfMember.status should ===(MemberStatus.Up)
-        }
+        Cluster(testKit.system).selfMember.status should ===(MemberStatus.Up)
       }
     }
 
-    "create new user and account" in {
+    "not create new account if not initialized" in {
       val phoneNumber = "8 942 323 43 74"
       val pricingPlanName = "some plan"
       val pricingPlan = 500
       val email = generateEmail
 
-      val accountProbe = testKit.createTestProbe[AccountActor.State]
-
-      val account = ClusterSharding(testKit.system).entityRefFor(AccountActor.typeKey,
-        AccountActor.entityId(phoneNumber))
-      val user = ClusterSharding(testKit2.system).entityRefFor(UserActor.typeKey,
+      val user = ClusterSharding(testKit.system).entityRefFor(UserActor.typeKey,
         UserActor.entityId(email))
 
-      user ! UserActor.AddAccount(phoneNumber, pricingPlanName, pricingPlan)
+      user ! UserActor.AddAccount(phoneNumber, pricingPlanName, pricingPlan, probe.ref)
 
-      Thread.sleep(1000)
+      val actualState = probe.receiveMessage()
 
-      account ! AccountActor.Get(accountProbe.ref)
+      actualState.isInitialized should ===(false)
+      actualState.phoneNumbers should not contain phoneNumber
+    }
 
-      val actualState = accountProbe.receiveMessage()
+    "create new account if initialized" in {
+      val phoneNumber = "8 942 323 43 74"
+      val pricingPlanName = "some plan"
+      val pricingPlan = 500
+      val email = generateEmail
 
-      actualState.pricingPlanName should ===(pricingPlanName)
-      actualState.pricingPlan should ===(pricingPlan)
+      val user = ClusterSharding(testKit.system).entityRefFor(UserActor.typeKey,
+        UserActor.entityId(email))
+
+      val firstName = "first name"
+      val lastName = "last name"
+      val dateOfBirth = LocalDate.now()
+
+      user ! UserActor.ChangeUserData(Some(firstName), Some(lastName), Some(dateOfBirth), probe.ref)
+
+      probe.expectMessageType[UserActor.State]
+
+      user ! UserActor.AddAccount(phoneNumber, pricingPlanName, pricingPlan, probe.ref)
+
+      val actualState = probe.receiveMessage()
+
+      actualState.isInitialized should ===(true)
+      actualState.phoneNumbers should contain(phoneNumber)
     }
 
     "change user data" in {
       val email = generateEmail
       val firstName = "first name"
       val lastName = "last name"
-      val dateOfBirth = null
-
-      val probe = testKit2.createTestProbe[UserActor.State]
+      val dateOfBirth = LocalDate.now()
 
       val user = ClusterSharding(testKit.system).entityRefFor(UserActor.typeKey,
         UserActor.entityId(email))
-      val user2 = ClusterSharding(testKit2.system).entityRefFor(UserActor.typeKey,
-        UserActor.entityId(email))
 
-      user ! UserActor.ChangeUserData(Some(firstName), Some(lastName), None)
-
-      Thread.sleep(600)
-
-      user2 ! UserActor.Get(probe.ref)
+      user ! UserActor.ChangeUserData(Some(firstName), Some(lastName), Some(dateOfBirth), probe.ref)
 
       val actualState = probe.receiveMessage()
       actualState.firstName should ===(firstName)

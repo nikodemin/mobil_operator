@@ -15,9 +15,9 @@ import scala.concurrent.ExecutionContext
 
 class AccountQueryRouter(accountService: AccountQueryService)
                         (implicit executionContext: ExecutionContext) extends BaseRouter {
-  override def route: Route = getByQueryRoute ~ getByLastTakeOffDateBetweenRoute
+  override def route: Route = getByQueryRoute ~ getByLastTakeOffDateBetweenRoute ~ getByBalanceLowerThatRoute
 
-  override def endpoints: List[Endpoint[_, _, _, _]] = List(getByQuery, getByLastTakeOffDateBetween)
+  override def endpoints: List[Endpoint[_, _, _, _]] = List(getByQuery, getByLastTakeOffDateBetween, getByBalanceLowerThat)
 
   private val accountEndpoint = endpoint.tag("Account").in("account")
 
@@ -38,4 +38,14 @@ class AccountQueryRouter(accountService: AccountQueryService)
     .out(jsonBody[Seq[AccountResponseDto]])
 
   private val getByLastTakeOffDateBetweenRoute = getByLastTakeOffDateBetween.toRoute(accountService.getByLastTakeOffDateBetween)
+
+  private val getByBalanceLowerThat = accountEndpoint
+    .post
+    .name("Get by balance lower that")
+    .in("balance lower that")
+    .in("balance")
+    .in(path[Long]("balance"))
+    .out(jsonBody[Seq[AccountResponseDto]])
+
+  private val getByBalanceLowerThatRoute = getByBalanceLowerThat.toRoute(accountService.getByBalanceLowerThat)
 }

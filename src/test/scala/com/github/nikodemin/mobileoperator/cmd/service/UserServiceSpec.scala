@@ -7,7 +7,7 @@ import akka.cluster.sharding.typed.scaladsl.EntityTypeKey
 import akka.cluster.sharding.typed.testkit.scaladsl.TestEntityRef
 import akka.util.Timeout
 import com.github.nikodemin.mobileoperator.cmd.actor.UserActor
-import com.github.nikodemin.mobileoperator.cmd.model.dto.{UserAddDto, UserChangeDto}
+import com.github.nikodemin.mobileoperator.cmd.model.dto.{AccountAddDto, UserChangeDto}
 import com.github.nikodemin.mobileoperator.util.ClusterShardingMock
 import com.typesafe.config.ConfigFactory
 import org.scalamock.scalatest.MockFactory
@@ -29,39 +29,6 @@ class UserServiceSpec extends AnyWordSpecLike
   private val userService = new UserService(shardingMock)
 
   "User service" should {
-    "add user" in {
-      forAll("email", "firstName", "lastName") {
-        (email: String, firstName: String, lastName: String) =>
-          val dateOfBirth = LocalDate.now
-          val userAddDto = UserAddDto(firstName, lastName, email, dateOfBirth)
-          val entityRef = TestEntityRef(UserActor.typeKey, email, probe.ref)
-
-          (shardingMock.entityRefFor(_: EntityTypeKey[UserActor.Command], _: String))
-            .expects(UserActor.typeKey, UserActor.entityId(email)).returning(entityRef)
-
-          userService.addUser(userAddDto)
-          val message: UserActor.Command = probe.receiveMessage
-
-          assert(message.isInstanceOf[UserActor.ChangeUserData])
-          val actual = message.asInstanceOf[UserActor.ChangeUserData]
-          actual.dateOfBirth.get should ===(dateOfBirth)
-          actual.firstName.get should ===(firstName)
-          actual.lastName.get should ===(lastName)
-      }
-    }
-
-    "get user by email" in {
-      forAll("email") { email: String =>
-        val entityRef = TestEntityRef(UserActor.typeKey, email, probe.ref)
-        (shardingMock.entityRefFor(_: EntityTypeKey[UserActor.Command], _: String))
-          .expects(UserActor.typeKey, UserActor.entityId(email)).returning(entityRef)
-
-        userService.getUserByEmail(email)
-
-        probe.expectMessageType[UserActor.Get]
-      }
-    }
-
     "change user" in {
       forAll("email", "firstName", "lastName") {
         (email: String, firstName: String, lastName: String) =>
@@ -81,6 +48,26 @@ class UserServiceSpec extends AnyWordSpecLike
           actual.firstName.get should ===(firstName)
           actual.lastName.get should ===(lastName)
 
+      }
+    }
+
+    "add account" in {
+      forAll("email", "phoneNumber", "pricingPlanName", "pricingPlan") {
+        (email: String, phoneNumber: String, pricingPlanName: String, pricingPlan: Int) =>
+          val accountAddDto = AccountAddDto(email, phoneNumber, pricingPlanName, pricingPlan)
+
+          val entityRef = TestEntityRef(UserActor.typeKey, email, probe.ref)
+          (shardingMock.entityRefFor(_: EntityTypeKey[UserActor.Command], _: String))
+            .expects(UserActor.typeKey, UserActor.entityId(email)).returning(entityRef)
+
+          userService.addAccount(accountAddDto)
+
+          val message = probe.receiveMessage
+          assert(message.isInstanceOf[UserActor.AddAccount])
+          val actual = message.asInstanceOf[UserActor.AddAccount]
+          actual.phoneNumber should ===(phoneNumber)
+          actual.pricingPlanName should ===(pricingPlanName)
+          actual.pricingPlan should ===(pricingPlan)
       }
     }
   }
